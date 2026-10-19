@@ -24,7 +24,7 @@ PCT, NUM, NUM2 = "0.0%", "#,##0.0", "#,##0.00"
 # 假设页单元格地址（公式里引用）
 A = {"company": "B3", "base_year": "B4", "base_revenue": "B5", "base_nwc": "B6", "tax_rate": "B7", "da_pct": "B8",
      "capex_pct": "B9", "nwc_pct": "B10", "wacc": "B11", "terminal_growth": "B12", "debt": "B13", "cash": "B14",
-     "minority": "B15", "shares": "B16", "price": "B17"}
+     "minority": "B15", "shares": "B16", "price": "B17", "extra_cash": "B18", "fx_to_price": "B19"}
 
 
 def _header(ws, row: int, values: list):
@@ -51,7 +51,8 @@ def build_workbook(x: DCFInputs, company: str, price: float, history: pd.DataFra
             ("wacc", "WACC", x.wacc, PCT), ("terminal_growth", "永续增长率", x.terminal_growth, PCT),
             ("debt", "有息负债", x.debt, NUM), ("cash", "现金及交易性金融资产", x.cash, NUM),
             ("minority", "少数股东权益", x.minority, NUM), ("shares", "总股本（亿股）", x.shares, NUM2),
-            ("price", "当前股价（元）", price, NUM2)]
+            ("price", "当前股价（元）", price, NUM2), ("extra_cash", "其他类现金资产（需年报佐证）", x.extra_cash, NUM),
+            ("fx_to_price", "汇率：报表币种 → 股价币种", x.fx_to_price, "0.0000")]
     _header(ws, 2, ["项目", "数值", "依据"])
     for key, label, val, fmt in rows:
         r = int(A[key][1:])
@@ -103,16 +104,16 @@ def build_workbook(x: DCFInputs, company: str, price: float, history: pd.DataFra
              ("终值现值", f"=B4/(1+假设!B11)^{n}", NUM),
              ("企业价值 EV", "=B3+B5", NUM),
              ("减：有息负债", "=假设!B13", NUM),
-             ("加：现金", "=假设!B14", NUM),
+             ("加：现金（含其他类现金资产）", "=假设!B14+假设!B18", NUM),
              ("减：少数股东权益", "=假设!B15", NUM),
              ("股权价值", "=B6-B7+B8-B9", NUM),
-             ("每股价值（元）", "=B10/假设!B16", NUM2),
-             ("当前股价（元）", "=假设!B17", NUM2),
+             ("每股价值（股价币种）", "=B10/假设!B16*假设!B19", NUM2),
+             ("当前股价", "=假设!B17", NUM2),
              ("相对现价", "=B11/B12-1", PCT),
              ("终值占 EV 比重", "=B5/B6", PCT)]
     for i, (lab, f, fmt) in enumerate(items, start=3):
         v.cell(row=i, column=1, value=lab).font = BOLD if lab.startswith(("每股", "企业", "股权")) else Font()
-        c = v.cell(row=i, column=2, value=f)
+        c = v.cell(row=i, column=2, value=f)  # noqa
         c.number_format = fmt
     v.column_dimensions["A"].width, v.column_dimensions["B"].width = 24, 14
 
@@ -133,7 +134,7 @@ def build_workbook(x: DCFInputs, company: str, price: float, history: pd.DataFra
             gc = f"{col(2 + j)}$4"
             f = (f"=(SUMPRODUCT(预测!$B$13:${last}$13/(1+$A{r})^预测!$B$3:${last}$3)"
                  f"+预测!${last}$13*(1+{gc})/($A{r}-{gc})/(1+$A{r})^{n}"
-                 f"-假设!$B$13+假设!$B$14-假设!$B$15)/假设!$B$16")
+                 f"-假设!$B$13+假设!$B$14+假设!$B$18-假设!$B$15)/假设!$B$16*假设!$B$19")
             cell = s.cell(row=r, column=2 + j, value=f)
             cell.number_format = NUM2
     s.column_dimensions["A"].width = 12
@@ -172,6 +173,99 @@ def build_workbook(x: DCFInputs, company: str, price: float, history: pd.DataFra
                 c = h.cell(row=i, column=j, value=None if pd.isna(yv) else float(yv))
                 c.number_format = PCT if k.endswith(("growth", "margin", "rate", "pct", "roe", "_np")) or k == "roe" else NUM
         h.column_dimensions["A"].width = 26
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+    return path
+
+
+def build_fin_workbook(x, company: str, price: float, history: pd.DataFrame | None = None, path: Path | None = None) -> Path:
+    """金融企业估值模型：PB-ROE + 两阶段 DDM，全部是公式。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "假设"
+    ws["A1"], ws["A1"].font = f"{company} 估值模型：PB-ROE 与 DDM（蓝色为输入假设）", Font(bold=True, size=13)
+    _header(ws, 2, ["项目", "数值", "依据"])
+    rows = [("基期年份", x.base_year, None, "base_year"), ("每股普通股净资产 BVPS（元）", x.bvps, NUM2, "bvps"),
+            ("基期每股收益 EPS（元）", x.eps, NUM2, "eps"), ("长期可持续 ROE", x.roe, PCT, "roe"),
+            ("股权成本 Ke", x.ke, PCT, "ke"), ("永续增长率 g", x.g, PCT, "g"), ("第一阶段 EPS 增速 g1", x.g1, PCT, "g1"),
+            ("第一阶段派息率", x.payout1, PCT, "payout1"), ("第一阶段年数", x.years, None, "years"), ("当前股价（元）", price, NUM2, "price")]
+    for i, (lab, val, fmt, key) in enumerate(rows, start=3):
+        ws.cell(row=i, column=1, value=lab)
+        c = ws.cell(row=i, column=2, value=val)
+        c.font = BLUE
+        if fmt:
+            c.number_format = fmt
+        ws.cell(row=i, column=3, value=x.notes.get(key, ""))
+    ws.column_dimensions["A"].width, ws.column_dimensions["B"].width, ws.column_dimensions["C"].width = 28, 14, 70
+    # 假设页地址：B4 BVPS, B5 EPS, B6 ROE, B7 Ke, B8 g, B9 g1, B10 派息率, B11 年数, B12 股价
+
+    v = wb.create_sheet("估值")
+    v["A1"], v["A1"].font = "估值汇总", Font(bold=True, size=13)
+    items = [("合理 P/B =（ROE − g）/（Ke − g）", "=(假设!B6-假设!B8)/(假设!B7-假设!B8)", NUM2),
+             ("PB-ROE 每股价值（元）", "=B3*假设!B4", NUM2),
+             ("DDM 每股价值（元）", f"=DDM!B{2 + x.years + 6}", NUM2),
+             ("两种方法平均（元）", "=AVERAGE(B4,B5)", NUM2),
+             ("当前股价（元）", "=假设!B12", NUM2),
+             ("当前 P/B", "=假设!B12/假设!B4", NUM2),
+             ("平均值相对现价", "=B6/B7-1", PCT)]
+    for i, (lab, f, fmt) in enumerate(items, start=3):
+        v.cell(row=i, column=1, value=lab).font = BOLD if "每股" in lab else Font()
+        v.cell(row=i, column=2, value=f).number_format = fmt
+    v.column_dimensions["A"].width = 34
+
+    d = wb.create_sheet("DDM")
+    d["A1"], d["A1"].font = "两阶段股利贴现模型", Font(bold=True, size=13)
+    _header(d, 2, ["期数 t", "EPS", "DPS", "现值"])
+    n = x.years
+    for t in range(1, n + 1):
+        r = 2 + t
+        d.cell(row=r, column=1, value=t)
+        d.cell(row=r, column=2, value=f"=假设!$B$5*(1+假设!$B$9)^A{r}").number_format = NUM2
+        d.cell(row=r, column=3, value=f"=B{r}*假设!$B$10").number_format = NUM2
+        d.cell(row=r, column=4, value=f"=C{r}/(1+假设!$B$7)^A{r}").number_format = NUM2
+    last = 2 + n
+    tail = [("第二阶段派息率 = 1 − g / ROE", "=1-假设!B8/假设!B6", PCT),
+            ("终值", f"=B{last}*(1+假设!B8)*B{last + 2}/(假设!B7-假设!B8)", NUM2),
+            ("终值现值", f"=B{last + 3}/(1+假设!B7)^假设!B11", NUM2),
+            ("第一阶段股利现值合计", f"=SUM(D3:D{last})", NUM2)]
+    for i, (lab, f, fmt) in enumerate(tail, start=last + 2):
+        d.cell(row=i, column=1, value=lab)
+        d.cell(row=i, column=2, value=f).number_format = fmt
+    d.cell(row=last + 6, column=1, value="DDM 每股价值（元）").font = BOLD          # = 第一阶段现值合计 + 终值现值
+    d.cell(row=last + 6, column=2, value=f"=B{last + 5}+B{last + 4}").number_format = NUM2
+    d.column_dimensions["A"].width = 30
+
+    s = wb.create_sheet("敏感性")
+    s["A1"], s["A1"].font = "PB-ROE 每股价值敏感性（行：Ke，列：g）", Font(bold=True, size=13)
+    kes = [round(x.ke + k * 0.005, 4) for k in range(-2, 3)]
+    gs = [round(x.g + k * 0.005, 4) for k in range(-2, 3)]
+    s["A4"] = "Ke \\ g"
+    for j, g in enumerate(gs):
+        c = s.cell(row=4, column=2 + j, value=g)
+        c.number_format, c.font = PCT, BLUE
+    for i, k in enumerate(kes):
+        r = 5 + i
+        c = s.cell(row=r, column=1, value=k)
+        c.number_format, c.font = PCT, BLUE
+        for j in range(len(gs)):
+            gc = f"{col(2 + j)}$4"
+            s.cell(row=r, column=2 + j, value=f"=(假设!$B$6-{gc})/($A{r}-{gc})*假设!$B$4").number_format = NUM2
+
+    if history is not None:
+        h = wb.create_sheet("历史")
+        h["A1"], h["A1"].font = "历史指标（亿元；每股为元）", Font(bold=True, size=13)
+        show = {"net_profit_parent": "归母净利润", "profit_growth": "利润增速", "common_equity": "普通股净资产", "bvps": "BVPS",
+                "eps": "EPS", "roe": "ROE", "roa": "ROA", "nii_share": "净利息收入占比", "credit_cost": "信用成本",
+                "loan_to_deposit": "贷存比", "leverage": "权益乘数", "dps_paid": "当年派发每股股利", "payout": "派息率（近似）"}
+        _header(h, 2, ["项目"] + [int(y) for y in history.index])
+        for i, (k, lab) in enumerate(show.items(), start=3):
+            h.cell(row=i, column=1, value=lab)
+            for j, yv in enumerate(history[k].tolist(), start=2):
+                c = h.cell(row=i, column=j, value=None if pd.isna(yv) else float(yv))
+                c.number_format = PCT if k in ("profit_growth", "roe", "roa", "nii_share", "credit_cost", "loan_to_deposit", "payout") else NUM2
+        h.column_dimensions["A"].width = 22
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

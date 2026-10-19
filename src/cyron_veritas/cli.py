@@ -18,7 +18,8 @@ def main(argv: list[str] | None = None) -> None:
     r = sub.add_parser("risk", help="生成组合风控日报")
     r.add_argument("--portfolio", default=str(PORTFOLIO_DIR / "sample_portfolio.csv"))
     s = sub.add_parser("research", help="运行 DCF 研究 Agent")
-    s.add_argument("ticker", help="A 股 6 位代码，例如 000333")
+    s.add_argument("ticker", help="A 股 6 位代码，例如 000333（银行、保险、券商自动改用 PB-ROE / DDM）")
+    s.add_argument("--review", action="store_true", help="估值假设需要人工审批（在终端里批准 / 修改 / 驳回）")
     w = sub.add_parser("serve", help="启动 Web 界面")
     w.add_argument("--port", type=int, default=8100)
     w.add_argument("--host", default="127.0.0.1")
@@ -50,7 +51,25 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "research":
         from cyron_veritas.research import agent
 
-        res = agent.run(a.ticker)
+        res = agent.start(a.ticker, review=a.review, on_event=lambda e: e.get("type") in ("status", "tool") and
+                          print(f"  · {e.get('label') or ''} {e.get('detail') or e.get('text') or ''}"))
+        while res["status"] == "review":
+            p = res["proposal"]
+            print(f"\n== 估值假设待审批（{p['method']}）：Agent 建议基准情景每股 {p['per_share']} 元，现价 {p['price']} 元 ==")
+            for k, v in p["assumptions"].items():
+                print(f"  {k:16s} = {v}    依据：{p['notes'].get(k, '')}")
+            ans = input("回车批准；输入 key=value（多个用空格分隔）修改后重算；输入 reject 驳回：").strip()
+            if not ans:
+                decision = {"action": "approve"}
+            elif ans == "reject":
+                decision = {"action": "reject", "comment": input("驳回理由：")}
+            else:
+                edits = {}
+                for kv in ans.split():
+                    k, v = kv.split("=", 1)
+                    edits[k] = json.loads(v) if v.startswith("[") else float(v)
+                decision = {"action": "edit", "assumptions": edits, "comment": input("修改理由：")}
+            res = agent.resume(res["run_id"], decision)
         st = res["stats"]
         print(f"用时 {st['seconds']}s  证据 {st['evidence_items']} 条  DCF 情景 {st['dcf_runs']}")
         print(f"数字溯源 {res['check']['numbers_traced']}/{res['check']['numbers_total']}  未溯源 {res['check']['unknown_numbers']}")

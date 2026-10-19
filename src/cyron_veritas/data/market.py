@@ -75,12 +75,19 @@ def fx_history() -> pd.DataFrame:
     return out.sort_index().dropna()
 
 
-def risk_free_rate() -> dict:
-    """中国 10 年期国债收益率（最新一天，小数）。"""
+def risk_free_rate(market: str = "A") -> dict:
+    """10 年期国债收益率（最新一天，小数）：A 股用中国国债；港股（港元联系汇率）和美股用美国国债。"""
     import akshare as ak
 
     start = (dt.date.today() - dt.timedelta(days=60)).strftime("%Y%m%d")
     df = _cached("cn_bond", lambda: ak.bond_zh_us_rate(start_date=start))
-    s = pd.to_numeric(df["中国国债收益率10年"], errors="coerce").dropna()
+    col = "中国国债收益率10年" if market == "A" else "美国国债收益率10年"
+    s = pd.to_numeric(df[col], errors="coerce").dropna()
     return {"rate": float(s.iloc[-1]) / 100, "date": str(pd.to_datetime(df["日期"]).iloc[s.index[-1]].date()),
-            "source": "akshare bond_zh_us_rate（中国国债收益率10年）"}
+            "source": f"akshare bond_zh_us_rate（{col}）"}
+
+
+def fx_rate(from_ccy: str, to_ccy: str) -> float:
+    """最新中间价换算：1 单位 from_ccy = ? to_ccy。"""
+    last = fx_history().iloc[-1]
+    return float(last[from_ccy] / last[to_ccy])

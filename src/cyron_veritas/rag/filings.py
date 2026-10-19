@@ -61,8 +61,8 @@ def find_report(ticker: str, year: int) -> dict:
 
     df = ak.stock_zh_a_disclosure_report_cninfo(symbol=ticker, market="沪深京", category="年报",
                                                 start_date=f"{year + 1}0101", end_date=f"{year + 1}1231")
-    title = f"{year}年年度报告"
-    cand = df[df["公告标题"].str.contains(title) & ~df["公告标题"].str.contains("摘要|英文|已取消")]
+    title = f"{year}年度报告"  # 标题有「2025年年度报告」和「XX公司2025年度报告」两种写法
+    cand = df[df["公告标题"].str.contains(rf"{year}年(?:年)?度报告") & ~df["公告标题"].str.contains("摘要|英文|已取消|半年度")]
     if cand.empty:
         raise LookupError(f"巨潮资讯网找不到 {ticker} 的{title}")
     row = cand.sort_values("公告时间").iloc[-1]  # 有更正版时取最新

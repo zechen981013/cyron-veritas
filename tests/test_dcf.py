@@ -37,3 +37,19 @@ def test_sensitivity_center_equals_base():
 def test_wacc_weights():
     w = D.wacc(0.02, 1.0, 0.06, 0.04, 0.25, 900, 100)
     assert w["wacc"] == pytest.approx(0.9 * 0.08 + 0.1 * 0.03)
+
+
+def test_extra_cash_requires_evidence_and_adds_value():
+    assert any("extra_cash" in e for e in _inputs(extra_cash=50.0).validate())
+    x = _inputs(extra_cash=50.0, notes={"extra_cash": "年报 p.208"})
+    assert x.validate() == []
+    assert D.value(x)["per_share"] == pytest.approx(D.value(_inputs())["per_share"] + 5.0)
+
+
+def test_pb_roe_and_ddm_consistent():
+    from cyron_veritas.valuation import fin as V
+    x = V.FinInputs(base_year=2025, bvps=40, eps=5, roe=0.125, ke=0.09, g=0.03, g1=0.03, payout1=1 - 0.03 / 0.125)
+    # 增速、派息率都取稳态值且 EPS = ROE × BVPS 时，DDM 退化为戈登模型：
+    # DDM 用下一年的股利 E0(1+g)·p，PB-ROE 用当期 B0·ROE·p，两者正好相差 (1+g)
+    assert V.ddm(x)["per_share"] == pytest.approx(V.pb_roe(x)["per_share"] * 1.03, rel=1e-9)
+    assert any("永续增长率" in e for e in V.FinInputs(2025, 40, 5, 0.1, 0.09, 0.085, 0.03, 0.3).validate())

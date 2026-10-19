@@ -18,7 +18,7 @@ def _env() -> Environment:
     return env
 
 
-def render_risk(pr, limits, narrative, check, source, facts_table, out_dir: Path) -> dict:
+def render_risk(pr, limits, narrative, check, source, facts_table, out_dir: Path, narrative_html: dict | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     f = pr.facts
     imgs = {
@@ -30,7 +30,7 @@ def render_risk(pr, limits, narrative, check, source, facts_table, out_dir: Path
     }
     pos = pr.positions.reset_index().to_dict("records")
     ctx = dict(f=f, limits=limits, n=narrative, check=check, source=source, pos=pos, img=imgs)
-    html = _env().get_template("risk.html.j2").render(**ctx)
+    html = _env().get_template("risk.html.j2").render(**{**ctx, "n": narrative_html or narrative})
     md = _env().get_template("risk.md.j2").render(**ctx)
     (out_dir / "risk_report.html").write_text(html, encoding="utf-8")
     (out_dir / "risk_report.md").write_text(md, encoding="utf-8")

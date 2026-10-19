@@ -3,8 +3,8 @@
   FCFF_t = EBIT_t × (1 − 税率) + D&A_t − 资本开支_t − ΔNWC_t
   终值    = FCFF_N × (1 + g) / (WACC − g)                     （戈登增长模型，年末折现）
   企业价值 = Σ FCFF_t / (1+WACC)^t + 终值 / (1+WACC)^N
-  股权价值 = 企业价值 − 有息负债 + 现金 − 少数股东权益
-  每股价值 = 股权价值 / 总股本
+  股权价值 = 企业价值 − 有息负债 + 现金 + 其他类现金资产（需年报佐证）− 少数股东权益
+  每股价值 = 股权价值 / 总股本 × 汇率（报表币种 → 股价币种）
 """
 from __future__ import annotations
 
@@ -32,6 +32,8 @@ class DCFInputs:
     minority: float
     shares: float                  # 亿股
     notes: dict = field(default_factory=dict)  # 每个假设的依据（给报告和 Excel 用）
+    extra_cash: float = 0.0        # 亿元：计入其他科目的定期存款 / 理财等，必须有年报出处
+    fx_to_price: float = 1.0       # 报表币种 → 股价币种（例如腾讯报表人民币、股价港元）
 
     def validate(self) -> list[str]:
         errs = []
@@ -48,6 +50,10 @@ class DCFInputs:
             errs.append("永续增长率应在 -2% 到 4% 之间（不应超过长期名义 GDP 增速）")
         if self.shares <= 0:
             errs.append("股本必须为正")
+        if self.extra_cash < 0:
+            errs.append("其他类现金资产不能为负")
+        if self.extra_cash > 0 and not self.notes.get("extra_cash"):
+            errs.append("填了其他类现金资产（extra_cash）就必须在 notes 里写明年报出处（科目、金额、页码）")
         return errs
 
 
@@ -79,9 +85,9 @@ def value(x: DCFInputs, wacc: float | None = None, g: float | None = None) -> di
     tv = p["fcff"].iloc[-1] * (1 + x.terminal_growth) / (x.wacc - x.terminal_growth)
     pv_tv = tv / (1 + x.wacc) ** n
     ev = p["pv_fcff"].sum() + pv_tv
-    equity = ev - x.debt + x.cash - x.minority
+    equity = ev - x.debt + x.cash + x.extra_cash - x.minority
     return {"projection": p, "pv_fcff_sum": float(p["pv_fcff"].sum()), "terminal_value": float(tv), "pv_terminal": float(pv_tv),
-            "enterprise_value": float(ev), "equity_value": float(equity), "per_share": float(equity / x.shares),
+            "enterprise_value": float(ev), "equity_value": float(equity), "per_share": float(equity / x.shares * x.fx_to_price),
             "tv_share_of_ev": float(pv_tv / ev)}
 
 

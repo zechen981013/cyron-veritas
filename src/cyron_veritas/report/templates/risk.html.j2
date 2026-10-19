@@ -11,7 +11,7 @@ td:first-child,th:first-child{text-align:left}.tag{padding:1px 8px;border-radius
 .超限{background:#fdecea;color:var(--red)}.预警{background:#fff4e0;color:var(--amber)}.正常{background:#e8f5f1;color:var(--accent)}
 .ai{background:#f6faf9;border-left:3px solid var(--accent);padding:12px 16px;border-radius:4px}.ai ul{margin:6px 0 6px 18px;padding:0}
 .src{font-size:12px;color:var(--muted)}.ok{color:var(--accent)}.bad{color:var(--red)}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}img{max-width:100%}.neg{color:var(--red)}
+.fact{border-bottom:1px dotted var(--accent);cursor:help}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}img{max-width:100%}.neg{color:var(--red)}
 </style></head><body>
 <div class="sub" style="letter-spacing:.08em;color:var(--accent);font-weight:600">CYRON VERITAS</div><h1>组合风控日报</h1>
 <div class="sub">数据日期 {{ f.as_of }} · {{ f.n_positions }} 个持仓 · {{ f.accounts|length }} 个账户（{{ f.accounts|join('、') }}）· 本币：人民币 · 汇率 USD {{ f.fx.USD|num(4) }} / HKD {{ f.fx.HKD|num(4) }}</div>
@@ -30,7 +30,7 @@ td:first-child,th:first-child{text-align:left}.tag{padding:1px 8px;border-radius
 <b>主要风险</b><ul>{% for x in n.key_risks %}<li>{{ x }}</li>{% endfor %}</ul>
 {% if n.limit_comments %}<b>超限与预警</b><ul>{% for x in n.limit_comments %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
 <b>需要复核</b><ul>{% for x in n.review_items %}<li>{{ x }}</li>{% endfor %}</ul>
-<div class="src">来源：{{ source }}{% if check.numbers_total is defined %} · 数字溯源 {{ check.numbers_traced }}/{{ check.numbers_total }}
+<div class="src">来源：{{ source }}{% if check.numbers_total is defined %} · 结构化引用 {{ check.numbers_traced }}/{{ check.numbers_total }}（鼠标悬停数字可看对应指标）
 {% if check.ok %}<span class="ok">✓ 全部能在计算结果中找到</span>{% else %}<span class="bad">✗ 无出处数字 {{ check.unknown_numbers|join(', ') }}</span>{% endif %}{% endif %}</div>
 </div>
 

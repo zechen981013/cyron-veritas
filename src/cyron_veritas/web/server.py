@@ -59,6 +59,9 @@ def start_job(kind: str, params: dict, fn) -> Job:
     def run():
         try:
             job.result = fn(job)
+            if job.status == "review":
+                job.emit({"type": "awaiting_review"})
+                return
             job.status = "done"
             job.emit({"type": "done"})
         except BaseException as e:  # SystemExit（金融企业不适用 DCF）也要报给前端
@@ -94,7 +97,7 @@ async def job_events(jid: str):
             while i < len(job.events):
                 yield {"data": json.dumps(job.events[i], ensure_ascii=False, default=str)}
                 i += 1
-            if job.status != "running" and i >= len(job.events):
+            if job.status in ("done", "error") and i >= len(job.events):
                 break
             await asyncio.sleep(0.4)
 
@@ -153,22 +156,68 @@ def risk_run(req: RiskReq):
 # ---------------- 研究 Agent ----------------
 class ResearchReq(BaseModel):
     ticker: str
+    review: bool = True
 
 
 @app.post("/api/research/start")
 def research_start(req: ResearchReq):
-    t = req.ticker.strip()
-    if not (t.isdigit() and len(t) == 6):
-        raise HTTPException(400, "请输入 6 位 A 股代码")
+    from cyron_veritas.data.financials import market_of
+
+    try:
+        t = market_of(req.ticker)[1]
+    except ValueError:
+        raise HTTPException(400, "请输入 A 股 6 位、港股 5 位数字或美股字母代码")
 
     def work(job: Job):
         from cyron_veritas.research import agent
 
-        res = agent.run(t, on_event=job.emit)
-        return {"memo": (Path(res["paths"]["memo"]).read_text(encoding="utf-8")), "stats": res["stats"],
-                "files": {k: _url(v) for k, v in res["paths"].items()}}
+        res = agent.start(t, review=req.review, on_event=job.emit, run_id=job.id)
+        return _research_result(job, res)
 
-    return {"job_id": start_job("research", {"ticker": t}, work).id}
+    return {"job_id": start_job("research", {"ticker": t, "review": req.review}, work).id}
+
+
+def _research_result(job: Job, res: dict) -> dict:
+    if res["status"] == "review":  # 停在审批节点：任务保持「待审批」，等 /review 接口恢复
+        job.status = "review"
+        return {"proposal": res["proposal"]}
+    return {"memo": (Path(res["paths"]["memo"]).read_text(encoding="utf-8")), "stats": res["stats"],
+            "files": {k: _url(v) for k, v in res["paths"].items()}}
+
+
+class ReviewReq(BaseModel):
+    action: str  # approve / edit / reject
+    assumptions: dict = {}
+    comment: str = ""
+    reviewer: str = "分析师"
+
+
+@app.post("/api/research/{jid}/review")
+def research_review(jid: str, req: ReviewReq):
+    job = JOBS.get(jid)
+    if not job or job.status != "review":
+        raise HTTPException(400, "这个任务不在待审批状态")
+    if req.action not in ("approve", "edit", "reject"):
+        raise HTTPException(400, "action 只能是 approve / edit / reject")
+    job.status = "running"
+    job.emit({"type": "status", "text": {"approve": "分析师已批准，定稿中", "edit": "分析师修改了假设，重新计算估值",
+                                          "reject": "分析师驳回了估值假设"}[req.action]})
+
+    def run():
+        from cyron_veritas.research import agent
+
+        try:
+            job.result = _research_result(job, agent.resume(jid, req.model_dump()))
+            if job.status == "running":
+                job.status = "done"
+                job.emit({"type": "done"})
+        except BaseException as e:
+            job.status, job.error = "error", str(e)
+            job.emit({"type": "error", "text": job.error})
+            traceback.print_exc()
+
+    POOL.submit(run)
+    return {"ok": True}
 
 
 @app.get("/api/research/history")
