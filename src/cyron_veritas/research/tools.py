@@ -141,6 +141,22 @@ def web_search(query: str, max_results: int = 5) -> dict:
     return {"query": query, "results": res, "source": "Tavily 新闻搜索（近一年）"}
 
 
+def annual_report_search(ticker: str, query: str) -> dict:
+    """在已入库的最新年报里检索（混合检索 + 重排），返回原文片段和页码。"""
+    from cyron_veritas.rag import index as I
+
+    years = sorted(int(k.split("_")[1]) for k in I.manifest() if k.startswith(ticker + "_"))
+    if not years:
+        return {"ok": False, "error": f"{ticker} 的年报还没有入库"}
+    y = years[-1]
+    meta = I.manifest()[f"{ticker}_{y}"]
+    hits = I.search(query, ticker, y, top=4)
+    return {"ok": True, "report": f"{meta['company']} {y} 年年度报告", "url": meta["page_url"],
+            "unit_note": "年报表格金额单位多为人民币千元",
+            "passages": [{"page": f"p.{d['page_start']}" + (f"-{d['page_end']}" if d["page_end"] != d["page_start"] else ""),
+                          "section": d["section"], "subsection": d["subsection"], "text": d["text"][:900]} for d in hits]}
+
+
 # ---------- 包成 LangChain 工具（带账本） ----------
 class TickerArgs(BaseModel):
     ticker: str = Field(description="A 股 6 位代码，例如 000333")
@@ -161,6 +177,10 @@ class DCFArgs(TickerArgs):
     wacc: float
     terminal_growth: float
     notes: dict[str, str] = Field(default_factory=dict, description="每个假设的依据，键为假设名，值写清锚定的历史数据或理由")
+
+
+class ReportArgs(TickerArgs):
+    query: str = Field(description="要在年报里查找的内容，用年报措辞，例如「其他流动资产 定期存款」「分地区收入 海外」「可能面对的风险」")
 
 
 class SearchArgs(BaseModel):
@@ -198,4 +218,6 @@ def make_tools(ledger: Ledger) -> dict[str, StructuredTool]:
                         "按给定假设运行 5 年 FCFF 折现模型，返回每股价值、相对现价、终值占比、敏感性表。假设不合理会返回错误让你修改。",
                         post=dcf_post),
         "search_news": wrap("search_news", web_search, SearchArgs, "搜索近一年的公司和行业新闻，返回标题、链接、日期、摘要。"),
+        "search_annual_report": wrap("search_annual_report", annual_report_search, ReportArgs,
+                                     "在公司最新年报原文里检索（混合检索 + 重排），返回原文片段、章节和页码。用于核实业务结构、科目明细、风险披露。"),
     }

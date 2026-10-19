@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware, TodoListMiddleware, ToolCallLimitMiddleware
-from langchain_core.callbacks import UsageMetadataCallbackHandler
+from langchain_core.callbacks import BaseCallbackHandler, UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage
 
 from cyron_veritas import verify as V
@@ -28,7 +28,7 @@ from cyron_veritas.research.tools import Ledger, financials_summary, make_tools
 from cyron_veritas.valuation.excel import build_workbook
 
 HIDDEN = {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
-MAIN_CALLS, SUB_CALLS, MAX_TASKS = 12, 10, 4
+MAIN_CALLS, SUB_CALLS, MAX_TASKS = 14, 10, 5
 
 
 class HideFilesystemTools(AgentMiddleware):
@@ -49,14 +49,16 @@ COMMON = """数字规则：所有数字必须直接来自工具返回结果，�
 比率在工具里是小数（0.102），写报告时写成百分比（10.2%）。金额单位是亿元。"""
 
 SUBAGENTS = {
-    "financial-analyst": (["get_financials", "get_market_data"], {"get_financials": 2, "get_market_data": 2},
+    "financial-analyst": (["get_financials", "get_market_data", "search_annual_report"],
+        {"get_financials": 2, "get_market_data": 2, "search_annual_report": 3},
         "财务分析师：分析公司近 6 年财务表现和利润质量，返回带证据编号的发现。",
         f"""你是买方研究员里的财务分析师。用工具取数后，分析：
 1. 增长：收入增速的趋势和波动；
 2. 盈利能力：毛利率、EBIT 利润率、ROE 的变化；
 3. 利润质量：经营现金流 / 归母净利润（大于 1 说明利润含金量高）、应收和存货周转天数；
 4. 营运资本、资本开支、现金与有息负债；
-5. 异常：某一年突然跳变的指标，说明可能的原因（例如科目重分类、一次性项目），并提醒估值时如何处理。
+5. 异常：某一年突然跳变的指标，用 search_annual_report 到年报附注里查原因（例如「其他流动资产」「定期存款」「应收票据」），
+   引用年报页码说明；查不到就写「年报中未找到原因」，并提醒估值时如何处理。
 输出 5-8 条发现，每条一句结论 + 关键数字 + 证据编号。{COMMON}"""),
     "valuation-analyst": (["get_financials", "get_market_data", "get_wacc_inputs", "run_dcf"],
         {"get_financials": 2, "get_market_data": 2, "get_wacc_inputs": 2, "run_dcf": 4},
@@ -68,6 +70,15 @@ SUBAGENTS = {
 3. 运行 run_dcf 三次：scenario=base、bull、bear（乐观 / 悲观只调整收入增速和利润率，并说明调整理由）；
    如果工具返回假设错误，修改后重试；
 4. 返回：三个情景的每股价值和相对现价、终值占 EV 比重、敏感性范围、最关键的两个假设。{COMMON}"""),
+    "filing-analyst": (["search_annual_report"], {"search_annual_report": 5},
+        "年报研究员：从最新年报原文中提取业务结构、海外收入、战略、风险披露、股东回报等要点，每条附页码。",
+        f"""你是年报研究员，只根据年报原文工作。用 search_annual_report 检索（最多 5 次），整理：
+1. 业务结构：分业务板块 / 分地区收入及占比；
+2. 管理层对行业和公司的判断、未来发展规划；
+3. 公司披露的主要风险及应对措施；
+4. 股东回报：分红、回购；
+5. 其他重要事项（重大诉讼、担保、关联交易等，如有）。
+每条一句话 + 关键数字 + 年报页码（如「年报 p.49」）+ 证据编号。年报金额多为千元，原样引用并注明单位。{COMMON}"""),
     "industry-researcher": (["search_news"], {"search_news": 3},
         "行业研究员：搜索近一年公司和行业新闻，整理催化剂和风险，带链接和日期。",
         """你是行业研究员。最多搜索 3 次（公司近况、行业竞争、政策或宏观风险），返回：
@@ -75,16 +86,17 @@ SUBAGENTS = {
 }
 
 MAIN_PROMPT = f"""你是基金公司的研究主管，要为一家 A 股公司写一份投资研究备忘录。
-工作方式：先用 write_todos 列出计划，再用 task 把工作分派给三个子 Agent（financial-analyst、valuation-analyst、industry-researcher），
-最多派 {MAX_TASKS} 次任务；拿到结果后由你汇总成备忘录。你自己也可以调用 get_market_data 核对股价。
+工作方式：先用 write_todos 列出计划，再用 task 把工作分派给子 Agent（financial-analyst、valuation-analyst、industry-researcher），
+以及 filing-analyst（年报原文），最多派 {MAX_TASKS} 次任务；拿到结果后由你汇总成备忘录。你自己也可以调用 get_market_data 核对股价。
 
 备忘录用中文 Markdown，结构固定：
 # 公司名（代码）研究备忘录
 ## 一、结论摘要（3-4 句：DCF 基准情景每股价值与现价对比、估值区间、最关键的判断依据。不给买入 / 卖出建议，只陈述估值与风险）
-## 二、财务分析（增长、盈利、利润质量、营运资本与资本开支、异常项）
-## 三、估值（假设表：假设 | 取值 | 依据；三个情景结果表；敏感性范围；终值占比的提示）
-## 四、催化剂与风险
-## 五、需要进一步核实的问题（2-4 条）
+## 二、财务分析（增长、盈利、利润质量、营运资本与资本开支、异常项及年报中的解释）
+## 三、年报要点（业务结构、管理层判断、风险披露、股东回报；每条注明「年报 p.X」）
+## 四、估值（假设表：假设 | 取值 | 依据；三个情景结果表；敏感性范围；终值占比的提示）
+## 五、催化剂与风险
+## 六、需要进一步核实的问题（2-4 条）
 ## 证据列表（证据编号 → 工具和用途，新闻附链接）
 
 {COMMON}
@@ -100,6 +112,38 @@ def build(ledger: Ledger, model=None):
                   "middleware": _limits(SUB_CALLS, per)} for name, (tnames, per, desc, prompt) in SUBAGENTS.items()]
     return create_deep_agent(model=model, tools=[tools["get_market_data"]], system_prompt=MAIN_PROMPT, subagents=subagents,
                              middleware=[TodoListMiddleware(), *_limits(MAIN_CALLS, {"task": MAX_TASKS})], name="research-lead")
+
+
+class ProgressHandler(BaseCallbackHandler):
+    """把工具调用实时转成事件（Web 界面显示 Agent 正在做什么）。子 Agent 的调用也会经过这里。"""
+
+    LABEL = {"write_todos": "列计划", "task": "派活给子 Agent", "get_financials": "取财报数据", "get_market_data": "取行情与 Beta",
+             "get_wacc_inputs": "计算 WACC", "run_dcf": "运行 DCF", "search_news": "搜索新闻", "search_annual_report": "检索年报原文"}
+
+    def __init__(self, say):
+        self.say = say
+
+    def on_tool_start(self, serialized, input_str, **kw):
+        name = (serialized or {}).get("name") or kw.get("name") or "tool"
+        if name in HIDDEN:
+            return
+        detail = ""
+        args = kw.get("inputs")  # LangChain 传的结构化参数；没有时再尝试解析字符串
+        if not isinstance(args, dict):
+            try:
+                args = json.loads(input_str) if isinstance(input_str, str) and input_str.startswith("{") else {}
+            except Exception:
+                args = {}
+        if isinstance(args, dict):
+            if name == "task":
+                detail = f"{args.get('subagent_type', '')}：{str(args.get('description', ''))[:80]}"
+            elif name == "write_todos":
+                detail = "；".join(t.get("content", "") for t in args.get("todos", []) if isinstance(t, dict))[:200]
+            elif name == "run_dcf":
+                detail = f"情景 {args.get('scenario')}，WACC {args.get('wacc')}，g {args.get('terminal_growth')}"
+            else:
+                detail = str(args.get("query") or args.get("ticker") or "")[:80]
+        self.say({"type": "tool", "name": name, "label": self.LABEL.get(name, name), "detail": detail})
 
 
 def _allowed_from_ledger(ledger: Ledger) -> set[str]:
@@ -137,16 +181,27 @@ def _allowed_from_ledger(ledger: Ledger) -> set[str]:
     return out | {repr(float(i)) for i in range(0, 11)}
 
 
-def run(ticker: str, model=None, out_root: Path | None = None) -> dict:
+def run(ticker: str, model=None, out_root: Path | None = None, on_event=None) -> dict:
     fin = financials_summary(ticker)
     if fin["is_financial"]:
         raise SystemExit(f"{fin['company']} 是金融企业，DCF（FCFF）不适用；银行和保险应使用 PB-ROE、DDM 或内含价值法（下一版支持）。")
+    from cyron_veritas.rag import index as I
+
+    say = on_event or (lambda e: None)
+    year = fin["latest_year"]
+    if f"{ticker}_{year}" not in I.manifest():  # 先把最新年报入库（第一次约 1 分钟）
+        try:
+            I.ingest(ticker, year, progress=lambda m: say({"type": "status", "text": f"年报入库：{m}"}))
+        except Exception as e:
+            say({"type": "status", "text": f"年报入库失败（{e}），本次不使用年报检索"})
     ledger = Ledger()
     usage = UsageMetadataCallbackHandler()
     t0 = time.time()
     agent = build(ledger, model)
     task = f"请研究 {fin['company']}（{ticker}），按要求写投资研究备忘录。今天是 {dt.date.today()}。"
-    out = agent.invoke({"messages": [{"role": "user", "content": task}]}, {"recursion_limit": 150, "callbacks": [usage]})
+    say({"type": "status", "text": "研究主管开始列计划、派子 Agent"})
+    out = agent.invoke({"messages": [{"role": "user", "content": task}]},
+                       {"recursion_limit": 150, "callbacks": [usage, ProgressHandler(say)]})
     msgs = out.get("messages", [])
     memo = next((m.content for m in reversed(msgs) if isinstance(m, AIMessage) and m.content and not m.tool_calls), "")
     if isinstance(memo, list):

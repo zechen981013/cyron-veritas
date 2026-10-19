@@ -19,7 +19,24 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--portfolio", default=str(PORTFOLIO_DIR / "sample_portfolio.csv"))
     s = sub.add_parser("research", help="运行 DCF 研究 Agent")
     s.add_argument("ticker", help="A 股 6 位代码，例如 000333")
+    w = sub.add_parser("serve", help="启动 Web 界面")
+    w.add_argument("--port", type=int, default=8100)
+    w.add_argument("--host", default="127.0.0.1")
+    i = sub.add_parser("ingest", help="下载并入库一份年报")
+    i.add_argument("ticker")
+    i.add_argument("year", type=int)
     a = ap.parse_args(argv)
+
+    if a.cmd == "serve":
+        from cyron_veritas.web.server import serve
+
+        serve(a.host, a.port)
+        return
+    if a.cmd == "ingest":
+        from cyron_veritas.rag import index as I
+
+        print(I.ingest(a.ticker, a.year, progress=print))
+        return
 
     if a.cmd == "risk":
         from cyron_veritas.risk import report_graph

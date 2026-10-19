@@ -1,0 +1,18 @@
+import { createApp } from 'vue'
+import { createRouter, createWebHistory } from 'vue-router'
+import App from './App.vue'
+import Risk from './views/Risk.vue'
+import Research from './views/Research.vue'
+import Filings from './views/Filings.vue'
+import './style.css'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/', redirect: '/risk' },
+    { path: '/risk', component: Risk, meta: { title: '组合风控' } },
+    { path: '/research', component: Research, meta: { title: '研究备忘录' } },
+    { path: '/filings', component: Filings, meta: { title: '年报问答' } },
+  ],
+})
+createApp(App).use(router).mount('#app')

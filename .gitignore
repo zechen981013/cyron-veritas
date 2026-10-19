@@ -6,3 +6,7 @@ data/cache/
 output/
 .pytest_cache/
 portfolio/private_*
+data/reports/
+data/index/
+frontend/node_modules/
+frontend/dist/
