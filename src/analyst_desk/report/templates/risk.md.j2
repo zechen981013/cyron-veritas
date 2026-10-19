@@ -1,0 +1,30 @@
+# 组合风控日报 {{ f.as_of }}
+
+组合总市值 {{ f.total_value|wan }} · 1日 95% VaR {{ f.var95_hist|pct(2) }}（约 {{ f.var95_amount|wan }}）· 年化波动率 {{ f.vol_ann|pct }} · 当前回撤 {{ f.current_drawdown|pct }}
+
+## 解读
+{{ n.summary }}
+
+**主要风险**
+{% for x in n.key_risks %}- {{ x }}
+{% endfor %}
+{% if n.limit_comments %}**超限与预警**
+{% for x in n.limit_comments %}- {{ x }}
+{% endfor %}{% endif %}
+**需要复核**
+{% for x in n.review_items %}- {{ x }}
+{% endfor %}
+> 来源：{{ source }}{% if check.numbers_total is defined %}；数字溯源 {{ check.numbers_traced }}/{{ check.numbers_total }}{% endif %}
+
+## 限额检查
+| 限额 | 限值 | 实际 | 说明 | 状态 |
+|---|---|---|---|---|
+{% for r in limits %}| {{ r.label }} | {{ '≥' if r.direction=='min' else '≤' }} {{ r.limit|pct }} | {{ r.value|pct }} | {{ r.note }} | {{ r.status }} |
+{% endfor %}
+## 压力测试
+| 情景 | 类型 | 组合损益 | 金额 |
+|---|---|---|---|
+{% for k,v in f.stress.items() %}| {{ k }} | {{ v.type }} | {{ v.pnl_pct|pct }} | {{ v.pnl_amount|wan }} |
+{% endfor %}
+## VaR 回测
+最近 {{ f.var_backtest.days }} 天突破 {{ f.var_backtest.exceptions }} 次（理论 {{ f.var_backtest.expected|num(1) }} 次），Kupiec p 值 {{ f.var_backtest.p_value|num }}。

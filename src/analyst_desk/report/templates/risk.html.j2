@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>组合风控日报 {{ f.as_of }}</title>
+<style>
+:root{--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb;--accent:#0E7C66;--red:#c0392b;--amber:#b7791f}
+body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;color:var(--ink);max-width:980px;margin:32px auto;padding:0 20px;line-height:1.6;font-size:14px}
+h1{font-size:22px;margin:0}h2{font-size:16px;border-bottom:2px solid var(--ink);padding-bottom:4px;margin-top:32px}
+.sub{color:var(--muted);font-size:12px}.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:18px 0}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:10px 12px}.kpi b{display:block;font-size:18px}.kpi span{color:var(--muted);font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:right}th{background:#f9fafb;font-weight:600}
+td:first-child,th:first-child{text-align:left}.tag{padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600}
+.超限{background:#fdecea;color:var(--red)}.预警{background:#fff4e0;color:var(--amber)}.正常{background:#e8f5f1;color:var(--accent)}
+.ai{background:#f6faf9;border-left:3px solid var(--accent);padding:12px 16px;border-radius:4px}.ai ul{margin:6px 0 6px 18px;padding:0}
+.src{font-size:12px;color:var(--muted)}.ok{color:var(--accent)}.bad{color:var(--red)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}img{max-width:100%}.neg{color:var(--red)}
+</style></head><body>
+<h1>组合风控日报</h1>
+<div class="sub">数据日期 {{ f.as_of }} · {{ f.n_positions }} 个持仓 · {{ f.accounts|length }} 个账户（{{ f.accounts|join('、') }}）· 本币：人民币 · 汇率 USD {{ f.fx.USD|num(4) }} / HKD {{ f.fx.HKD|num(4) }}</div>
+
+<div class="kpis">
+<div class="kpi"><span>组合总市值</span><b>{{ f.total_value|wan }}</b></div>
+<div class="kpi"><span>1日 95% VaR</span><b>{{ f.var95_hist|pct(2) }}</b><span>约 {{ f.var95_amount|wan }}</span></div>
+<div class="kpi"><span>年化波动率</span><b>{{ f.vol_ann|pct }}</b></div>
+<div class="kpi"><span>当前回撤</span><b>{{ f.current_drawdown|pct }}</b><span>最大 {{ f.max_drawdown|pct }}</span></div>
+<div class="kpi"><span>限额状态</span><b>{% set nb = limits|selectattr('status','equalto','超限')|list|length %}{{ nb }} 项超限</b><span>{{ limits|selectattr('status','equalto','预警')|list|length }} 项预警</span></div>
+</div>
+
+<h2>解读</h2>
+<div class="ai">
+<p>{{ n.summary }}</p>
+<b>主要风险</b><ul>{% for x in n.key_risks %}<li>{{ x }}</li>{% endfor %}</ul>
+{% if n.limit_comments %}<b>超限与预警</b><ul>{% for x in n.limit_comments %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+<b>需要复核</b><ul>{% for x in n.review_items %}<li>{{ x }}</li>{% endfor %}</ul>
+<div class="src">来源：{{ source }}{% if check.numbers_total is defined %} · 数字溯源 {{ check.numbers_traced }}/{{ check.numbers_total }}
+{% if check.ok %}<span class="ok">✓ 全部能在计算结果中找到</span>{% else %}<span class="bad">✗ 无出处数字 {{ check.unknown_numbers|join(', ') }}</span>{% endif %}{% endif %}</div>
+</div>
+
+<h2>限额检查</h2>
+<table><tr><th>限额</th><th>上限 / 下限</th><th>实际</th><th>说明</th><th>状态</th></tr>
+{% for r in limits %}<tr><td>{{ r.label }}</td><td>{{ '≥' if r.direction=='min' else '≤' }} {{ r.limit|pct }}</td><td>{{ r.value|pct }}</td><td>{{ r.note }}</td><td><span class="tag {{ r.status }}">{{ r.status }}</span></td></tr>{% endfor %}
+</table>
+
+<h2>持仓与敞口</h2>
+<table><tr><th>名称</th><th>代码</th><th>账户</th><th>行业</th><th>数量</th><th>现价（本币）</th><th>行情日期</th><th>市值</th><th>权重</th><th>浮盈亏</th></tr>
+{% for p in pos %}<tr><td>{{ p.name }}</td><td>{{ p.ticker }}</td><td>{{ p.accounts }}</td><td>{{ p.sector }}</td><td>{{ p.quantity|num(0) }}</td><td>{{ p.price_local|num }} {{ p.currency }}</td><td>{{ p.price_date }}</td><td>{{ p.value_cny|wan }}</td><td>{{ p.weight|pct }}</td>
+<td class="{{ 'neg' if p.pnl_local_pct < 0 }}">{{ p.pnl_local_pct|pct if p.market != 'CASH' else '' }}</td></tr>{% endfor %}
+</table>
+<div class="grid2" style="margin-top:12px"><img src="data:image/png;base64,{{ img.weights }}"><img src="data:image/png;base64,{{ img.sector }}"></div>
+<p class="sub">市场：{% for k,v in f.by_market.items() %}{{ k }} {{ v|pct }}{{ '，' if not loop.last }}{% endfor %} ·
+币种：{% for k,v in f.by_currency.items() %}{{ k }} {{ v|pct }}{{ '，' if not loop.last }}{% endfor %} ·
+最大持仓 {{ f.concentration.top1_name }} {{ f.concentration.top1|pct }}，前五大 {{ f.concentration.top5|pct }}，有效持仓数 {{ f.concentration.effective_n|num(1) }}</p>
+
+<h2>风险指标</h2>
+<div class="grid2"><div>
+<table><tr><th>指标</th><th>数值</th></tr>
+<tr><td>1日 95% VaR（历史法）</td><td>{{ f.var95_hist|pct(2) }} / {{ f.var95_amount|wan }}</td></tr>
+<tr><td>1日 95% VaR（参数法）</td><td>{{ f.var95_param|pct(2) }}</td></tr>
+<tr><td>1日 99% VaR（历史法）</td><td>{{ f.var99_hist|pct(2) }} / {{ f.var99_amount|wan }}</td></tr>
+<tr><td>1日 95% CVaR</td><td>{{ f.cvar95_hist|pct(2) }} / {{ f.cvar95_amount|wan }}</td></tr>
+<tr><td>年化波动率</td><td>{{ f.vol_ann|pct }}</td></tr>
+<tr><td>Beta（沪深300）</td><td>{{ f.beta_csi300|num }}</td></tr>
+<tr><td>最大回撤</td><td>{{ f.max_drawdown|pct }}（{{ f.mdd_peak }} 至 {{ f.mdd_trough }}）</td></tr>
+</table>
+<p class="sub">相关性最高：{% for a,b,c in f.top_corr_pairs %}{{ a }}–{{ b }} {{ c|num }}{{ '；' if not loop.last }}{% endfor %}</p>
+</div><img src="data:image/png;base64,{{ img.rc }}"></div>
+<img src="data:image/png;base64,{{ img.nav }}">
+
+<h2>压力测试</h2>
+<table><tr><th>情景</th><th>类型</th><th>区间</th><th>组合损益</th><th>金额</th></tr>
+{% for k,v in f.stress.items() %}<tr><td>{{ k }}</td><td>{{ v.type }}</td><td>{{ v.period }}</td><td class="{{ 'neg' if v.pnl_pct<0 }}">{{ v.pnl_pct|pct }}</td><td>{{ v.pnl_amount|wan }}</td></tr>{% endfor %}
+</table>
+
+<h2>VaR 模型回测</h2>
+<p>最近 {{ f.var_backtest.days }} 个交易日，95% VaR 被突破 <b>{{ f.var_backtest.exceptions }}</b> 次（理论值 {{ f.var_backtest.expected|num(1) }} 次）；
+Kupiec 检验 p 值 {{ f.var_backtest.p_value|num }}，{{ '不能拒绝「模型校准正确」' if f.var_backtest.p_value >= 0.05 else '模型可能低估或高估了风险，需要复核' }}。</p>
+<img src="data:image/png;base64,{{ img.bt }}">
+
+<h2>方法说明</h2>
+<ul class="sub">
+<li>风险指标按「当前持仓回放」：假设现在的持仓在过去 {{ f.lookback_days }} 个交易日（自 {{ f.lookback_start }} 起）不变，用各标的日收益率折算人民币后计算组合收益率。</li>
+<li>VaR 历史法取经验分位数；参数法假设正态分布；CVaR 为超过 VaR 部分的平均损失。现金日收益按 0 计。</li>
+<li>所有数字由代码计算（facts.json 可复核）；大模型只写解读，输出经过数字溯源校验，不提供任何投资建议。</li>
+<li>数据来源：akshare（东方财富、新浪财经、中国银行外汇中间价）。示例持仓仅用于演示。</li>
+</ul>
+</body></html>

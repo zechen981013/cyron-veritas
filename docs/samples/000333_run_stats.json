@@ -1,0 +1,72 @@
+{
+  "seconds": 47.2,
+  "main_tool_calls": [
+    "write_todos",
+    "task",
+    "task",
+    "task",
+    "get_market_data",
+    "write_todos"
+  ],
+  "evidence_items": 12,
+  "dcf_runs": [
+    [
+      "base",
+      151.74
+    ],
+    [
+      "bear",
+      110.57
+    ],
+    [
+      "bull",
+      191.43
+    ]
+  ],
+  "tokens": {
+    "deepseek-flash": {
+      "input_tokens": 52812,
+      "output_token_details": {},
+      "total_tokens": 68712,
+      "input_token_details": {
+        "cache_read": 26880
+      },
+      "output_tokens": 15900
+    }
+  },
+  "trace": {
+    "ok": false,
+    "unknown_numbers": [
+      "0.5"
+    ],
+    "advice_words": [],
+    "numbers_total": 460,
+    "numbers_traced": 459
+  },
+  "todos": [
+    {
+      "content": "制定研究计划并分派三个子 Agent（财务、估值、行业）",
+      "status": "completed"
+    },
+    {
+      "content": "核对美的集团（000333）最新股价与市值数据",
+      "status": "completed"
+    },
+    {
+      "content": "汇总财务分析结果",
+      "status": "completed"
+    },
+    {
+      "content": "汇总估值（DCF 三情景）结果",
+      "status": "completed"
+    },
+    {
+      "content": "汇总催化剂与风险（含新闻链接）",
+      "status": "completed"
+    },
+    {
+      "content": "撰写最终中文 Markdown 投资研究备忘录",
+      "status": "in_progress"
+    }
+  ]
+}

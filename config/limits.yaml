@@ -1,0 +1,11 @@
+# 组合风险限额（小数）。warn_ratio：用到限额的这个比例时提示预警。
+warn_ratio: 0.9
+limits:
+  single_name_max:      {value: 0.15, label: 单一持仓占比上限}
+  top5_max:             {value: 0.60, label: 前五大持仓合计上限}
+  sector_max:           {value: 0.35, label: 单一行业占比上限}
+  market_max:           {value: 0.60, label: 单一市场占比上限}
+  foreign_ccy_max:      {value: 0.60, label: 外币资产合计上限}
+  var95_1d_max:         {value: 0.025, label: 1日 95% VaR 上限（占组合）}
+  drawdown_alert:       {value: 0.15, label: 当前回撤预警线}
+  cash_min:             {value: 0.02, label: 现金下限, direction: min}
