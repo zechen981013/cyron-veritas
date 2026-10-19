@@ -6,7 +6,7 @@ import warnings
 
 import pandas as pd
 
-from analyst_desk.config import CACHE_DIR
+from cyron_veritas.config import CACHE_DIR
 
 warnings.filterwarnings("ignore")
 

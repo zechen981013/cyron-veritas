@@ -1,6 +1,6 @@
 import pytest
 
-from analyst_desk.valuation import dcf as D
+from cyron_veritas.valuation import dcf as D
 
 
 def _inputs(**kw):

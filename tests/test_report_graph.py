@@ -1,5 +1,5 @@
 """日报流程的路由：校验通过 → 出报告；不通过 → 重写一次；还不通过或模型挂了 → 模板。"""
-from analyst_desk.risk import report_graph as G
+from cyron_veritas.risk import report_graph as G
 
 
 def test_routes():
@@ -11,7 +11,7 @@ def test_routes():
 
 def test_fallback_text_is_fully_traced():
     from tests.test_verify_limits import _facts
-    from analyst_desk.risk import limits as L
+    from cyron_veritas.risk import limits as L
     f = _facts(total_value=1e6, var95_amount=2e4, stress={"x": {"type": "假设", "period": "", "pnl_pct": -0.1, "pnl_amount": -1e5}},
                risk_contribution={"A": 0.6, "B": 0.4})
     lim = L.check(f)

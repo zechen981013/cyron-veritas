@@ -1,5 +1,5 @@
-from analyst_desk import verify as V
-from analyst_desk.risk import limits as L
+from cyron_veritas import verify as V
+from cyron_veritas.risk import limits as L
 
 
 def test_numbers_must_come_from_facts():

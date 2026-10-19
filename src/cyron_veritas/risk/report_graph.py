@@ -18,10 +18,10 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
-from analyst_desk import verify as V
-from analyst_desk.config import OUTPUT_DIR, chat_model
-from analyst_desk.risk import limits as L
-from analyst_desk.risk import portfolio as P
+from cyron_veritas import verify as V
+from cyron_veritas.config import OUTPUT_DIR, chat_model
+from cyron_veritas.risk import limits as L
+from cyron_veritas.risk import portfolio as P
 
 MAX_REWRITES = 1
 
@@ -149,7 +149,7 @@ def node_fallback(state: State) -> State:
 
 
 def node_render(state: State) -> State:
-    from analyst_desk.report.render import render_risk
+    from cyron_veritas.report.render import render_risk
 
     out_dir = OUTPUT_DIR / "risk" / state["facts"]["as_of"]
     paths = render_risk(state["pr"], state["limits"], state["narrative"], state["check"], state["source"],

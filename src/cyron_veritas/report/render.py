@@ -6,8 +6,8 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from analyst_desk import verify as V
-from analyst_desk.report import charts
+from cyron_veritas import verify as V
+from cyron_veritas.report import charts
 
 TEMPLATES = Path(__file__).parent / "templates"
 

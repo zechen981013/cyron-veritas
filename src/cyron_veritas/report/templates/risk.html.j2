@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>组合风控日报 {{ f.as_of }}</title>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Cyron Veritas · 组合风控日报 {{ f.as_of }}</title>
 <style>
 :root{--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb;--accent:#0E7C66;--red:#c0392b;--amber:#b7791f}
 body{font-family:-apple-system,"PingFang SC","Helvetica Neue",sans-serif;color:var(--ink);max-width:980px;margin:32px auto;padding:0 20px;line-height:1.6;font-size:14px}
@@ -13,7 +13,7 @@ td:first-child,th:first-child{text-align:left}.tag{padding:1px 8px;border-radius
 .src{font-size:12px;color:var(--muted)}.ok{color:var(--accent)}.bad{color:var(--red)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}img{max-width:100%}.neg{color:var(--red)}
 </style></head><body>
-<h1>组合风控日报</h1>
+<div class="sub" style="letter-spacing:.08em;color:var(--accent);font-weight:600">CYRON VERITAS</div><h1>组合风控日报</h1>
 <div class="sub">数据日期 {{ f.as_of }} · {{ f.n_positions }} 个持仓 · {{ f.accounts|length }} 个账户（{{ f.accounts|join('、') }}）· 本币：人民币 · 汇率 USD {{ f.fx.USD|num(4) }} / HKD {{ f.fx.HKD|num(4) }}</div>
 
 <div class="kpis">

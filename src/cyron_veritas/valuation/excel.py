@@ -12,7 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter as col
 
-from analyst_desk.valuation.dcf import DCFInputs
+from cyron_veritas.valuation.dcf import DCFInputs
 
 BLUE = Font(color="1F4E9E")
 BOLD = Font(bold=True)

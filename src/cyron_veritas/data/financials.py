@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from analyst_desk.data.market import _cached
+from cyron_veritas.data.market import _cached
 
 YI = 1e8
 FIN_KEYWORDS = ("银行", "保险", "证券", "信托", "期货")

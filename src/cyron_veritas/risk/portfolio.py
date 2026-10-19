@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from analyst_desk.data import market
-from analyst_desk.risk import metrics as M
+from cyron_veritas.data import market
+from cyron_veritas.risk import metrics as M
 
 LOOKBACK_DAYS = 500  # 风险指标用最近约两年的交易日
 

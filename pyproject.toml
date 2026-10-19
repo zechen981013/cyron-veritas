@@ -1,5 +1,5 @@
 [project]
-name = "analyst-desk"
+name = "cyron-veritas"
 version = "0.1.0"
 description = "AI 投研助手：组合风控日报 + DCF 研究 Agent（数字由代码计算，大模型负责规划、检索与解读）"
 authors = [
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-desk = "analyst_desk.cli:main"
+veritas = "cyron_veritas.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]

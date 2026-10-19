@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from analyst_desk.risk import metrics as M
+from cyron_veritas.risk import metrics as M
 
 
 def _rets(n=1000, seed=0):

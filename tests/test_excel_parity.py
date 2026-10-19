@@ -1,8 +1,8 @@
 """Excel 公式模型和 Python 引擎必须算出同一个每股价值。"""
 import pytest
 
-from analyst_desk.valuation import dcf as D
-from analyst_desk.valuation.excel import build_workbook
+from cyron_veritas.valuation import dcf as D
+from cyron_veritas.valuation.excel import build_workbook
 
 formulas = pytest.importorskip("formulas")
 

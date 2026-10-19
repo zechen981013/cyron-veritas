@@ -1,4 +1,6 @@
-# analyst-desk · AI 投研助手
+# Cyron Veritas · AI 投研与风控助手
+
+> *Veritas*（拉丁语：真实）——每一个数字都由代码计算，每一句结论都可以追溯。
 
 **组合风控日报（LangGraph）+ DCF 研究 Agent（DeepAgents）**。模拟买方研究员和风控岗的日常工作流。
 
@@ -76,9 +78,9 @@ Agent 自己发现 2025 年营运资本占收入比从 −9.6% 跳到 +8.1%（�
 ```bash
 uv sync
 cp .env.example .env        # 填 LLM_API_KEY（DeepSeek 或任何 OpenAI 兼容接口），新闻搜索需要 TAVILY_API_KEY
-uv run desk risk            # 风控日报（默认 portfolio/sample_portfolio.csv）
-uv run desk risk --portfolio portfolio/private_mine.csv   # private_* 已在 .gitignore 中
-uv run desk research 000333 # DCF 研究 Agent（A 股非金融企业）
+uv run veritas risk            # 风控日报（默认 portfolio/sample_portfolio.csv）
+uv run veritas risk --portfolio portfolio/private_mine.csv   # private_* 已在 .gitignore 中
+uv run veritas research 000333 # DCF 研究 Agent（A 股非金融企业）
 uv run pytest -q            # 18 个测试
 ```
 
@@ -87,7 +89,7 @@ uv run pytest -q            # 18 个测试
 ## 目录
 
 ```
-src/analyst_desk/
+src/cyron_veritas/
   data/        market.py（行情、汇率、国债收益率，按天缓存）  financials.py（A 股三表 → 统一口径）
   risk/        metrics.py（纯函数）  portfolio.py（估值、敞口、压力测试）  limits.py  report_graph.py（LangGraph）
   valuation/   dcf.py（FCFF、WACC、敏感性）  excel.py（公式模型导出）

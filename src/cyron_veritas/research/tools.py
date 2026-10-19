@@ -15,10 +15,10 @@ import pandas as pd
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from analyst_desk.data import financials as F
-from analyst_desk.data import market
-from analyst_desk.risk import metrics as M
-from analyst_desk.valuation import dcf as D
+from cyron_veritas.data import financials as F
+from cyron_veritas.data import market
+from cyron_veritas.risk import metrics as M
+from cyron_veritas.valuation import dcf as D
 
 DEFAULT_ERP = 0.06  # A 股股权风险溢价假设（常见取值 5%-7%）
 

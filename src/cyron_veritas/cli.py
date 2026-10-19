@@ -1,7 +1,7 @@
 """命令行入口：
 
-    uv run desk risk  [--portfolio portfolio/sample_portfolio.csv]   生成组合风控日报
-    uv run desk research 000333                                    运行 DCF 研究 Agent
+    uv run veritas risk  [--portfolio portfolio/sample_portfolio.csv]   生成组合风控日报
+    uv run veritas research 000333                                    运行 DCF 研究 Agent
 """
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import argparse
 import json
 import sys
 
-from analyst_desk.config import PORTFOLIO_DIR
+from cyron_veritas.config import PORTFOLIO_DIR
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="desk", description="AI 投研助手：组合风控日报 + DCF 研究 Agent")
+    ap = argparse.ArgumentParser(prog="veritas", description="AI 投研助手：组合风控日报 + DCF 研究 Agent")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("risk", help="生成组合风控日报")
     r.add_argument("--portfolio", default=str(PORTFOLIO_DIR / "sample_portfolio.csv"))
@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> None:
     a = ap.parse_args(argv)
 
     if a.cmd == "risk":
-        from analyst_desk.risk import report_graph
+        from cyron_veritas.risk import report_graph
 
         st = report_graph.run(a.portfolio)
         lim = [x for x in st["limits"] if x["status"] != "正常"]
@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"解读来源：{st['source']}  数字溯源 {st['check'].get('numbers_traced')}/{st['check'].get('numbers_total')}")
         print(json.dumps(st["outputs"], ensure_ascii=False, indent=2))
     elif a.cmd == "research":
-        from analyst_desk.research import agent
+        from cyron_veritas.research import agent
 
         res = agent.run(a.ticker)
         st = res["stats"]

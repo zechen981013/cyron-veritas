@@ -22,10 +22,10 @@ from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddlewar
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage
 
-from analyst_desk import verify as V
-from analyst_desk.config import OUTPUT_DIR, chat_model
-from analyst_desk.research.tools import Ledger, financials_summary, make_tools
-from analyst_desk.valuation.excel import build_workbook
+from cyron_veritas import verify as V
+from cyron_veritas.config import OUTPUT_DIR, chat_model
+from cyron_veritas.research.tools import Ledger, financials_summary, make_tools
+from cyron_veritas.valuation.excel import build_workbook
 
 HIDDEN = {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
 MAIN_CALLS, SUB_CALLS, MAX_TASKS = 12, 10, 4
@@ -162,8 +162,8 @@ def run(ticker: str, model=None, out_root: Path | None = None) -> dict:
     paths = {}
     base = next((r for r in ledger.dcf_runs if r["scenario"] == "base"), ledger.dcf_runs[0] if ledger.dcf_runs else None)
     if base:
-        from analyst_desk.research.tools import wacc_inputs
-        from analyst_desk.data.financials import annual
+        from cyron_veritas.research.tools import wacc_inputs
+        from cyron_veritas.data.financials import annual
         w = next((i["result"] for i in ledger.items if i["tool"] == "get_wacc_inputs" and "wacc" in i["result"]), None)
         paths["excel"] = str(build_workbook(base["inputs"], fin["company"], base["result"]["price"], history=annual(ticker)["table"],
                                             wacc_detail=w, path=out_dir / f"{ticker}_DCF模型.xlsx"))

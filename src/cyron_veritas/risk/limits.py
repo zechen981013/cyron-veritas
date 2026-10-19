@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from analyst_desk.config import CONFIG_DIR
+from cyron_veritas.config import CONFIG_DIR
 
 OK, WARN, BREACH = "正常", "预警", "超限"
 

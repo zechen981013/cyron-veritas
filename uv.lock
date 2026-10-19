@@ -50,7 +50,7 @@ wheels = [
 ]
 
 [[package]]
-name = "analyst-desk"
+name = "cyron-veritas"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
