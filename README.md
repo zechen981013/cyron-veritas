@@ -2,15 +2,17 @@
 
 > *Veritas*（拉丁语：真实）——每一个数字都由代码计算，每一句结论都可以追溯。
 
-**组合风控日报（LangGraph）· 研究 Agent（DeepAgents，A 股 / 港股 / 美股，DCF 与 PB-ROE / DDM）· 估值假设人工审批（LangGraph interrupt）· 年报 RAG 问答 · Web 界面（FastAPI + Vue 3）**。
+**组合风控日报（LangGraph）· 研究 Agent（DeepAgents，A 股 / 港股 / 美股，DCF 与 PB-ROE / DDM）· 估值假设人工审批（LangGraph interrupt）· 年报 RAG 问答 · 业绩会纪要（含录音转写）· MCP Server · Web 界面（FastAPI + Vue 3）**。
 模拟买方研究员和风控岗的日常工作流。
 
 核心原则：**数字全部由代码计算，大模型只负责规划、检索、解读和写作；每份输出都做溯源校验**（数字能在计算结果或年报原文中找到、引用的页码在证据范围内）。
 这也是金融机构真正敢用 AI 的方式：结论可复核、过程可追溯、不给投资建议。
 
-| 组合风控 | 研究备忘录 | 估值假设审批 | 年报问答 |
-|---|---|---|---|
-| ![](docs/ui_risk.jpg) | ![](docs/ui_research.jpg) | ![](docs/ui_review.jpg) | ![](docs/ui_filings_qa.jpg) |
+| 组合风控 | 研究备忘录 | 估值假设审批 |
+|---|---|---|
+| ![](docs/ui_risk.jpg) | ![](docs/ui_research.jpg) | ![](docs/ui_review.jpg) |
+| **年报问答** | **业绩会纪要** | |
+| ![](docs/ui_filings_qa.jpg) | ![](docs/ui_calls.jpg) | |
 
 ## 模块
 
@@ -103,10 +105,37 @@ flowchart TB
   模型推理加锁（MPS 不支持多线程同时提交计算，多个子 Agent 并行检索曾导致 Metal 断言崩溃）。
 - **为什么风控用 LangGraph、研究用 DeepAgents**：日报步骤固定、要求稳定可复核 → 固定流程；研究是开放任务（查什么、查几轮、发现异常要不要追问）→ 让 Agent 自己列计划、派子 Agent。
 
-### 4. Web 界面（FastAPI + Vue 3）
+### 4. 业绩会纪要（投资者关系记录 / 录音 → 指引、回避的问题、环比变化）
 
-三个页面：组合风控（选持仓 → 生成日报，显示流程与校验结果）、研究备忘录（实时显示 Agent 在做什么、估值假设审批表单、下载 Excel 模型）、
-年报问答（入库新年报、流式回答、点页码看原文 / 打开 PDF 对应页）。长任务在后台线程运行，前端通过 SSE 订阅进度。
+```mermaid
+flowchart LR
+    T[巨潮「投资者关系活动记录表」PDF] --> P[解析：活动类别 / 参与机构 / 编号问答]
+    A[业绩会录音] --> W[本机 Whisper large-v3-turbo<br/>mlx-whisper] --> P
+    P --> E[大模型结构化抽取<br/>指引 · 经营数据 · 关注点 · 风险 · 新信息 · 回避 · 语气]
+    E --> C{每条原文引用逐字校验<br/>数字必须在原文中}
+    C --> D[与上一次对比：新话题 / 消失的话题 / 指引变化 / 语气变化]
+```
+
+- **研究员最需要的不是「这次说了什么」，而是「哪里变了、哪些问题没正面回答」**：抽取结果单列「回避或未正面回答」，对比单列「指引变化」。
+- **每条结论带原文引用**：引用去掉空白和标点后必须是原文子串，否则在纪要里标 ⚠️；概览和数值里的数字必须出现在原文中。
+- **实测**（美的集团 2026-09-15 业绩说明会，18 组网上问答，对比 2026-07-29 路演）：69 条引用全部通过、63 个数字全部可溯源、22 条对比变化引用全部通过；
+  纪要指出「B 端增速放缓原因、权益工具公允价值变动 26.77 亿元的来源、库卡分拆上市」等问题管理层均未正面回答。
+- **录音**：本机 mlx-whisper（30 秒音频约 9 秒转写，「百分之十二」自动规范为「12%」）；没有说话人分离，问答由大模型按语义切分（下一步：FunASR 说话人分离、SenseVoice 支持粤语）。
+
+### 5. MCP Server（Claude Desktop / Cursor 直接调用）
+
+`uv run veritas mcp`（stdio）暴露 10 个工具：`portfolio_risk`、`company_financials`、`market_snapshot`、`dcf_valuation`、
+`financial_institution_valuation`、`annual_report_search`、`annual_report_qa`、`ingest_annual_report`、`investor_relations_records`、`earnings_call_summary`。
+除年报入库外全部标注为只读；数字仍由代码计算，客户端的大模型只负责提问和组织回答。Claude Desktop 配置：
+
+```json
+{"mcpServers": {"cyron-veritas": {"command": "uv", "args": ["--directory", "/path/to/cyron-veritas", "run", "veritas", "mcp"]}}}
+```
+
+### 6. Web 界面（FastAPI + Vue 3）
+
+四个页面：组合风控（选持仓 → 生成日报，显示流程与校验结果）、研究备忘录（实时显示 Agent 在做什么、估值假设审批表单、下载 Excel 模型）、
+年报问答（入库新年报、流式回答、点页码看原文 / 打开 PDF 对应页）、业绩会纪要（选交流记录或上传录音，生成纪要并与上一次对比）。长任务在后台线程运行，前端通过 SSE 订阅进度。
 
 ## 样例结果（2026-10-20，真实模型 DeepSeek）
 
@@ -141,8 +170,11 @@ uv run veritas risk               # 命令行生成风控日报（默认 portfol
 uv run veritas ingest 000333 2025 # 下载并入库年报（约 1 分钟）
 uv run veritas research 000333    # 研究 Agent（也支持 600036 银行、00700 港股、AAPL 美股）
 uv run veritas research 600036 --review   # 估值假设在终端里人工审批
+uv run veritas calls 000333       # 最新一次投资者交流纪要，并与上一次对比
+uv run veritas transcribe call.m4a --company 某公司   # 录音 → 纪要
+uv run veritas mcp                # MCP Server（stdio）
 uv run python -m cyron_veritas.rag.evaluate --qa   # 年报问答评测
-uv run pytest -q                  # 34 个测试
+uv run pytest -q                  # 38 个测试
 ```
 
 向量和重排模型默认读 `~/models/bge-m3`、`~/models/bge-reranker-v2-m3`，不存在则从 HuggingFace 下载（`EMBED_MODEL` / `RERANK_MODEL` 可覆盖）。
@@ -157,6 +189,8 @@ src/cyron_veritas/
   valuation/   dcf.py（FCFF、WACC、敏感性）  fin.py（PB-ROE、DDM）  excel.py（公式模型导出）
   rag/         filings.py（下载、解析、切块）  index.py（Milvus Lite + BM25 + 重排）  qa.py（带页码问答与校验）  evaluate.py
   research/    tools.py（工具 + 证据账本）  agent.py（DeepAgents 主 / 子 Agent + 外层审批流程）
+  calls/       source.py（记录表解析、Whisper 转写）  analyze.py（抽取、引用校验、对比）  run.py
+  mcp_server.py  MCP Server（10 个工具）
   web/         server.py（FastAPI、后台任务、SSE）
   report/      charts.py  render.py  templates/
   verify.py    数字溯源与措辞检查

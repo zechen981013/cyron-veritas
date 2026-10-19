@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -306,6 +306,52 @@ async def qa_stream(req: QAReq):
             yield {"data": json.dumps({"type": "error", "text": str(e)}, ensure_ascii=False)}
 
     return EventSourceResponse(gen())
+
+
+# ---------- 业绩会纪要 ----------
+@app.get("/api/calls/{ticker}/records")
+def call_records(ticker: str):
+    from cyron_veritas.calls import run as R
+
+    try:
+        return R.records(ticker)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+class CallReq(BaseModel):
+    ticker: str
+    record_id: str | None = None
+    compare: bool = True
+
+
+@app.post("/api/calls/run")
+def call_run(req: CallReq):
+    def work(job: Job):
+        from cyron_veritas.calls import run as R
+
+        res = R.run(req.ticker, req.record_id, req.compare, say=job.emit)
+        return {"markdown": res["markdown"], "check": res["result"]["check"], "summary": res["result"]["summary"],
+                "record": res["result"]["record"], "compare": res["compare"]}
+
+    return {"job_id": start_job("calls", req.model_dump(), work).id}
+
+
+@app.post("/api/calls/audio")
+async def call_audio(file: UploadFile = File(...), company: str = Form("")):
+    import tempfile
+
+    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+    tmp = Path(tempfile.mkdtemp()) / f"upload{suffix}"
+    tmp.write_bytes(await file.read())
+
+    def work(job: Job):
+        from cyron_veritas.calls import run as R
+
+        res = R.from_audio(tmp, company, say=job.emit)
+        return {"markdown": res["markdown"], "check": res["result"]["check"], "transcript": res["transcript"]}
+
+    return {"job_id": start_job("audio", {"file": file.filename}, work).id}
 
 
 @app.get("/api/health")

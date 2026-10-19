@@ -20,18 +20,44 @@ def main(argv: list[str] | None = None) -> None:
     s = sub.add_parser("research", help="运行 DCF 研究 Agent")
     s.add_argument("ticker", help="A 股 6 位代码，例如 000333（银行、保险、券商自动改用 PB-ROE / DDM）")
     s.add_argument("--review", action="store_true", help="估值假设需要人工审批（在终端里批准 / 修改 / 驳回）")
+    sub.add_parser("mcp", help="以 MCP Server（stdio）方式运行，供 Claude Desktop / Cursor 调用")
     w = sub.add_parser("serve", help="启动 Web 界面")
     w.add_argument("--port", type=int, default=8100)
     w.add_argument("--host", default="127.0.0.1")
+    c = sub.add_parser("calls", help="业绩会 / 投资者交流纪要（巨潮投资者关系活动记录表，默认最新一次并与上一次对比）")
+    c.add_argument("ticker")
+    c.add_argument("--record", help="记录编号（默认最新一次）")
+    c.add_argument("--no-compare", action="store_true")
+    au = sub.add_parser("transcribe", help="业绩会录音 → Whisper 转写 → 纪要")
+    au.add_argument("audio")
+    au.add_argument("--company", default="")
     i = sub.add_parser("ingest", help="下载并入库一份年报")
     i.add_argument("ticker")
     i.add_argument("year", type=int)
     a = ap.parse_args(argv)
 
+    if a.cmd == "mcp":
+        from cyron_veritas.mcp_server import main as mcp_main
+
+        mcp_main()
+        return
     if a.cmd == "serve":
         from cyron_veritas.web.server import serve
 
         serve(a.host, a.port)
+        return
+    if a.cmd == "calls":
+        from cyron_veritas.calls import run as R
+
+        res = R.run(a.ticker, a.record, compare=not a.no_compare, say=lambda e: print("  ·", e.get("text", "")))
+        print(res["markdown"])
+        print("\n已保存：", res["path"])
+        return
+    if a.cmd == "transcribe":
+        from cyron_veritas.calls import run as R
+
+        res = R.from_audio(a.audio, a.company, say=lambda e: print("  ·", e.get("text", "")))
+        print(res["markdown"])
         return
     if a.cmd == "ingest":
         from cyron_veritas.rag import index as I
