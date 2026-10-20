@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pandas as pd
+import pandas as pd  # noqa: F401
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -352,6 +352,179 @@ async def call_audio(file: UploadFile = File(...), company: str = Form("")):
         return {"markdown": res["markdown"], "check": res["result"]["check"], "transcript": res["transcript"]}
 
     return {"job_id": start_job("audio", {"file": file.filename}, work).id}
+
+
+# ---------- 资管中台 ----------
+def _jsonable(x):
+    return json.loads(json.dumps(x, ensure_ascii=False, default=str))
+
+
+@app.get("/api/fund/products")
+def fund_products():
+    from cyron_veritas.fund import db as FDB
+
+    return _jsonable(FDB.df("select code, name, type from products").to_dict("records"))
+
+
+@app.get("/api/fund/{code}/overview")
+def fund_overview(code: str):
+    from cyron_veritas.fund import db as FDB
+    from cyron_veritas.fund import marketdata as FM
+    from cyron_veritas.fund import perf as PF
+    from cyron_veritas.fund import product as FP
+
+    cfg = FP.load(code)
+    nav = FDB.df("select date, unit_nav, net_assets, shares, cash, stock_mv from nav where product = :p order by date", p=code)
+    nav["date"] = pd.to_datetime(nav["date"])
+    b = FM.index_close(cfg["benchmark"]).reindex(nav["date"]).ffill()
+    nav["bench"] = (b / b.iloc[0]).values
+    m = PF.nav_metrics(code)
+    snap = FDB.df("select date, metrics from risk_snapshots where product = :p order by date desc limit 1", p=code)
+    rec = FDB.df("select date, status, diff, explained from reconciliation where product = :p order by date desc limit 10", p=code)
+    flows = FDB.df("select date, type, amount, shares, nav from flows where product = :p order by date", p=code)
+    open_events = FDB.df("select count(*) as n from limit_events where product = :p and handled_by is null", p=code)["n"].iloc[0]
+    metrics = snap["metrics"].iloc[0] if len(snap) else {}
+    if isinstance(metrics, str):
+        metrics = json.loads(metrics)
+    return _jsonable({"product": {k: cfg[k] for k in ("code", "name", "type", "manager", "custodian", "inception", "benchmark", "fees", "contract_limits")},
+                      "nav": nav[["date", "unit_nav", "bench", "net_assets"]].assign(date=nav["date"].dt.strftime("%Y-%m-%d")).to_dict("records"),
+                      "metrics": {k: v for k, v in m.items() if k != "monthly"},
+                      "monthly": m["monthly"].reset_index().rename(columns={"index": "month", "date": "month"}).assign(
+                          month=lambda x: pd.to_datetime(x.iloc[:, 0]).dt.strftime("%Y-%m")).to_dict("records"),
+                      "risk": metrics, "reconciliation": rec.to_dict("records"), "flows": flows.to_dict("records"), "open_events": int(open_events)})
+
+
+@app.get("/api/fund/{code}/events")
+def fund_events(code: str, only_open: bool = True, limit: int = 200):
+    from cyron_veritas.fund import db as FDB
+
+    q = "select * from limit_events where product = :p" + (" and handled_by is null" if only_open else "") + " order by date desc, id desc limit :n"
+    return _jsonable(FDB.df(q, p=code, n=limit).to_dict("records"))
+
+
+class HandleReq(BaseModel):
+    handled_by: str
+    note: str
+
+
+@app.post("/api/fund/{code}/events/{eid}/handle")
+def fund_event_handle(code: str, eid: int, req: HandleReq):
+    import datetime as _dt
+
+    from cyron_veritas.fund import db as FDB
+
+    with FDB.engine().begin() as c:
+        c.execute(FDB.limit_events.update().where((FDB.limit_events.c.id == eid) & (FDB.limit_events.c.product == code))
+                  .values(handled_by=req.handled_by, handled_at=_dt.datetime.now(), note=req.note))
+    return {"ok": True}
+
+
+@app.get("/api/fund/{code}/holdings")
+def fund_holdings(code: str, date: str | None = None):
+    from cyron_veritas.fund import db as FDB
+    from cyron_veritas.fund import marketdata as FM
+    from cyron_veritas.fund import risk as FR
+
+    d = date or str(FDB.df("select max(date) as d from nav where product = :p", p=code)["d"].iloc[0])
+    h = FR.holdings_on(code, d)
+    h["industry"] = h["code"].map(FM.sw_industry()).fillna("未分类")
+    return _jsonable({"date": d, "holdings": h.sort_values("mv", ascending=False).to_dict("records")})
+
+
+@app.get("/api/fund/{code}/attribution")
+def fund_attribution(code: str):
+    from cyron_veritas.fund import perf as PF
+
+    b = PF.brinson(code)
+    s = PF.style_exposure(code)
+    return _jsonable({"brinson": b.to_dict("records"), "brinson_total": b.drop(columns=["month", "超配最多", "低配最多"]).sum().to_dict(),
+                      "style": s.reset_index().rename(columns={"index": "factor"}).to_dict("records")})
+
+
+class PretradeReq(BaseModel):
+    orders: list[dict]
+    date: str | None = None
+
+
+@app.post("/api/fund/{code}/pretrade")
+def fund_pretrade(code: str, req: PretradeReq):
+    from cyron_veritas.fund import risk as FR
+
+    d = req.date or str(FR.nav_series(code).index[-1].date())
+    return _jsonable(FR.pretrade(code, d, req.orders))
+
+
+@app.get("/api/fund/{code}/pool")
+def fund_pool(code: str):
+    from cyron_veritas.fund import db as FDB
+
+    p = FDB.df("select * from stock_pool where product = :p order by since desc, id desc", p=code)
+    latest = p.sort_values(["since", "id"]).groupby("code").tail(1)
+    ic = FDB.df("select * from ic_decisions where product = :p order by decided_at desc, id desc limit 100", p=code)
+    from cyron_veritas.fund import product as FP
+    return _jsonable({"pools": latest.sort_values(["pool", "code"]).to_dict("records"), "ic": ic.to_dict("records"),
+                      "banned": FP.load(code).get("banned", [])})
+
+
+class ICReq(BaseModel):
+    code: str
+    name: str = ""
+    request: str = "入核心池"
+    requested_by: str = "研究员"
+    material: str = ""
+    decision: str          # 批准 / 否决 / 补充材料
+    votes: dict = {}
+    note: str = ""
+
+
+@app.post("/api/fund/{code}/ic")
+def fund_ic(code: str, req: ICReq):
+    import datetime as _dt
+
+    from cyron_veritas.fund import db as FDB
+
+    today = _dt.date.today()
+    FDB.add(FDB.ic, {"product": code, "code": req.code.zfill(6), "name": req.name, "request": req.request, "requested_by": req.requested_by,
+                     "requested_at": today, "material": req.material, "decision": req.decision, "votes": req.votes, "decided_at": today, "note": req.note})
+    if req.decision == "批准":
+        pool_name = {"入核心池": "核心池", "调出核心池": "观察池", "入禁投池": "禁投池"}.get(req.request, "观察池")
+        FDB.add(FDB.pool, {"product": code, "code": req.code.zfill(6), "name": req.name, "pool": pool_name, "since": today, "until": None,
+                           "reason": f"投委会批准：{req.request}", "decision_id": None})
+    return {"ok": True}
+
+
+@app.get("/api/fund/{code}/sheets")
+def fund_sheets(code: str, limit: int = 30):
+    from cyron_veritas.fund import product as FP
+
+    files = sorted(FP.sheet_dir(code).glob("*.xlsx"), reverse=True)[:limit]
+    return [{"name": f.name, "url": f"/sheets/{code}/{f.name}"} for f in files]
+
+
+@app.get("/sheets/{code}/{name}")
+def fund_sheet_file(code: str, name: str):
+    from cyron_veritas.fund import product as FP
+
+    f = FP.sheet_dir(code) / name
+    if not f.exists() or ".." in name:
+        raise HTTPException(404)
+    return FileResponse(f, filename=name)
+
+
+class ReportReq(BaseModel):
+    month: str
+
+
+@app.post("/api/fund/{code}/report")
+def fund_report(code: str, req: ReportReq):
+    def work(job: Job):
+        from cyron_veritas.fund import report as FRP
+
+        job.emit({"type": "status", "text": "计算业绩、归因、风险，生成经理观点"})
+        r = FRP.build(code, req.month)
+        return {"html": _url(r["html"]), "pdf": _url(r["pdf"]) if r["pdf"] else None, "check": r["check"]}
+
+    return {"job_id": start_job("report", {"code": code, "month": req.month}, work).id}
 
 
 @app.get("/api/health")

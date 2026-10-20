@@ -3,7 +3,8 @@
     <aside class="nav">
       <div class="brand"><span class="mark">◆</span> CYRON <b>VERITAS</b></div>
       <div class="tag">AI 投研与风控助手</div>
-      <router-link to="/risk"><span>◧</span> 组合风控</router-link>
+      <router-link to="/fund"><span>▣</span> 资管中台</router-link>
+      <router-link to="/risk"><span>◧</span> 组合风控（演示）</router-link>
       <router-link to="/research"><span>◩</span> 研究备忘录</router-link>
       <router-link to="/filings"><span>◨</span> 年报问答</router-link>
       <router-link to="/calls"><span>◪</span> 业绩会纪要</router-link>

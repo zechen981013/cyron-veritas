@@ -21,6 +21,12 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("ticker", help="A 股 6 位代码，例如 000333（银行、保险、券商自动改用 PB-ROE / DDM）")
     s.add_argument("--review", action="store_true", help="估值假设需要人工审批（在终端里批准 / 修改 / 驳回）")
     sub.add_parser("mcp", help="以 MCP Server（stdio）方式运行，供 Claude Desktop / Cursor 调用")
+    fd = sub.add_parser("fund", help="资管中台：模拟产品、估值表入库、每日风控、交易前检查、月报")
+    fd.add_argument("action", choices=["simulate", "backfill", "daily", "pretrade", "report", "perf"])
+    fd.add_argument("product", nargs="?", default="CV-VG1")
+    fd.add_argument("--date")
+    fd.add_argument("--month", help="月报月份，如 2026-09")
+    fd.add_argument("--orders", help="交易前检查的指令 JSON 文件：[{code, side, qty}]")
     w = sub.add_parser("serve", help="启动 Web 界面")
     w.add_argument("--port", type=int, default=8100)
     w.add_argument("--host", default="127.0.0.1")
@@ -36,6 +42,28 @@ def main(argv: list[str] | None = None) -> None:
     i.add_argument("year", type=int)
     a = ap.parse_args(argv)
 
+    if a.cmd == "fund":
+        from cyron_veritas.fund import pipeline
+
+        if a.action == "simulate":
+            from cyron_veritas.fund import simulate
+            print(simulate.run(a.product))
+        elif a.action == "backfill":
+            print(pipeline.backfill(a.product))
+        elif a.action == "daily":
+            pipeline.daily(a.product, a.date)
+        elif a.action == "pretrade":
+            from cyron_veritas.fund import risk as R
+            orders = json.loads(open(a.orders, encoding="utf-8").read())
+            print(json.dumps(R.pretrade(a.product, a.date or str(R.nav_series(a.product).index[-1].date()), orders), ensure_ascii=False, indent=2))
+        elif a.action == "report":
+            from cyron_veritas.fund import report
+            print(report.build(a.product, a.month))
+        elif a.action == "perf":
+            from cyron_veritas.fund import perf
+            m = perf.nav_metrics(a.product)
+            print(json.dumps({k: v for k, v in m.items() if k != "monthly"}, ensure_ascii=False, indent=2, default=str))
+        return
     if a.cmd == "mcp":
         from cyron_veritas.mcp_server import main as mcp_main
 

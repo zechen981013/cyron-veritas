@@ -1,0 +1,40 @@
+# Cyron 价值成长 1 号私募证券投资基金（模拟产品，用于演示中台；所有数据由真实行情按规则模拟生成）
+code: CV-VG1
+name: Cyron 价值成长1号私募证券投资基金
+type: equity_long            # equity_long / quant_enhanced / private_equity
+manager: Cyron 资产管理（模拟）
+custodian: 模拟托管人
+inception: 2024-01-02
+initial_capital: 100000000   # 首发规模（元），份额净值 1.0000
+benchmark: sh000300          # 业绩比较基准：沪深300
+fees:
+  management: 0.015          # 管理费（年化，按日计提，季末支付）
+  custody: 0.0005            # 托管费
+  performance: 0.20          # 业绩报酬（高水位法，赎回时提取；模拟中单列计提、不支付）
+contract_limits:             # 基金合同中的投资限制与风控条款
+  warning_line: 0.85         # 预警线：单位净值触及后不得新增仓位
+  stop_line: 0.80            # 止损线：单位净值触及后必须清仓
+  single_name_max: 0.10      # 单只股票市值 ≤ 基金净值 10%
+  industry_max: 0.30         # 单一申万一级行业 ≤ 净值 30%
+  cash_min: 0.02             # 现金类资产 ≥ 净值 2%
+  liquidity_5d_min: 0.80     # 5 个交易日内可变现资产 ≥ 80%（参与率 20%）
+  participation_rate: 0.20   # 流动性测算的成交量参与率
+banned:                      # 禁投池（合规原因，交易前检查直接拦截）
+  - {code: "000002", reason: "地产信用风险，投委会 2024-01 决议禁投"}
+strategy:
+  n_holdings: 25
+  max_weight: 0.08
+  cash_target: 0.03
+  rebalance: monthly
+  min_listed_days: 120
+flows:                       # 申购赎回（按 T 日净值确认）
+  - {date: 2024-07-01, type: subscribe, amount: 20000000}
+  - {date: 2025-01-02, type: subscribe, amount: 30000000}
+  - {date: 2025-07-01, type: redeem, amount: 15000000}
+  - {date: 2026-01-05, type: subscribe, amount: 10000000}
+trading:
+  commission: 0.00025        # 佣金万 2.5，最低 5 元
+  min_commission: 5
+  stamp_duty_sell: 0.0005    # 卖出印花税（2023-08-28 起减半为 0.05%）
+  transfer_fee: 0.00001      # 过户费（双向）
+  slippage: 0.001            # 以收盘价成交的冲击成本假设
