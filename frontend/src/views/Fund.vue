@@ -53,8 +53,10 @@
           <div v-for="(v, k) in r.by_industry" :key="k" class="row" style="gap:6px;margin:2px 0"><span style="width:80px">{{ k }}</span>
             <div :style="{ width: v * 600 + 'px', height: '9px', background: v > ov.product.contract_limits.industry_max * 0.9 ? 'var(--amber)' : 'var(--accent)', borderRadius: '3px' }"></div><span class="muted">{{ pct(v, 1) }}</span></div></div>
         <div class="card"><h3>待处理风控事件（{{ events.length }}）</h3>
-          <div class="timeline" style="max-height:300px"><div v-for="e in events.slice(0, 40)" :key="e.id">
-            <span class="t" style="width:80px">{{ e.date }}</span><span :class="['tagx', e.status]">{{ e.status }}</span> {{ e.detail }}
+          <p class="muted" style="margin:0 0 6px">同一规则在相邻交易日连续触发合并为一条，按区间处理留痕</p>
+          <div class="timeline" style="max-height:300px"><div v-for="e in events" :key="e.ids[0]">
+            <span class="t" style="width:170px">{{ e.start === e.end ? e.start : e.start + ' ~ ' + e.end }}</span><span :class="['tagx', e.status]">{{ e.status }}</span>
+            {{ e.detail }}（{{ e.days }} 天，极值 {{ e.rule.includes('line') ? e.peak.toFixed(4) : pct(e.peak, 1) }}）
             <span class="chip" @click="handle(e)">确认处理</span></div></div></div>
       </div>
     </template>
@@ -63,7 +65,7 @@
     <template v-if="tab === '业绩归因' && att">
       <div class="card"><h3>Brinson 归因（累计，各月加总）</h3>
         <table><tr><th v-for="k in attCols" :key="k">{{ k }}</th></tr><tr><td v-for="k in attCols" :key="k">{{ pct(att.brinson_total[k]) }}</td></tr></table>
-        <p class="sub">基准总收益 = 沪深300 实际涨跌；行业收益 = 申万一级行业指数；基准行业权重 = 沪深300 最新成分权重（近似），由此产生的差单列「基准近似误差」。</p></div>
+        <p class="sub">基准总收益 = 沪深300 实际涨跌；基准行业权重与收益 = 月初沪深300 成分股按申万一级归类（权重来源：{{ att.brinson?.[0]?.基准权重来源 }}）。成分股拼出的基准与真实指数之差（分红再投资、幸存者偏差）单列「基准近似误差」；配置 Tushare token 后自动改用历史成分权重。</p></div>
       <div class="card"><h3>逐月</h3>
         <table><tr><th>月份</th><th v-for="k in attCols" :key="k">{{ k }}</th><th>超配最多</th><th>低配最多</th></tr>
           <tr v-for="b in att.brinson.slice().reverse()" :key="b.month"><td>{{ b.month }}</td><td v-for="k in attCols" :key="k" :class="b[k] < 0 ? 'neg' : ''">{{ pct(b[k]) }}</td><td>{{ b['超配最多'] }}</td><td>{{ b['低配最多'] }}</td></tr></table></div>
@@ -144,8 +146,9 @@ async function loadAll() {
   api(`/api/fund/${code.value}/attribution`).then((x) => (att.value = x))
 }
 async function handle(e) {
-  const note = prompt(`处理说明（${e.detail}）`, '已知悉，下次调仓降低行业集中度'); if (!note) return
-  await api(`/api/fund/${code.value}/events/${e.id}/handle`, { handled_by: '风控岗', note }); events.value = await api(`/api/fund/${code.value}/events`)
+  const note = prompt(`处理说明（${e.detail}，${e.start} ~ ${e.end}）`, '已知悉，下次调仓降低行业集中度'); if (!note) return
+  await api(`/api/fund/${code.value}/events/handle`, { ids: e.ids, handled_by: '风控岗', note })
+  events.value = await api(`/api/fund/${code.value}/events`); ov.value.open_events = events.value.length
 }
 async function checkOrders() {
   const orders = orderText.value.trim().split('\n').map((l) => l.trim().split(/\s+/)).filter((x) => x.length >= 3)

@@ -165,6 +165,36 @@ def index_weights(symbol: str = "000300") -> pd.Series:
     return s.set_index("code")["weight"]
 
 
+def index_weights_hist(symbol: str = "000300", start: str = "20231201") -> pd.DataFrame | None:
+    """指数历史成分权重（Tushare index_weight，月度，需要 2000 积分）。没有 TUSHARE_TOKEN 时返回 None，调用方退回近似算法。
+    直接调 Tushare HTTP 接口，不依赖 tushare 包。返回列：date, code, weight（小数，每期合计约 1）。"""
+    import os
+
+    token = os.getenv("TUSHARE_TOKEN")
+    p = _p(f"wh_{symbol}")
+    if not token and not p.exists():
+        return None
+    if not p.exists() or dt.date.fromtimestamp(p.stat().st_mtime) < dt.date.today() - dt.timedelta(days=7):
+        import requests
+
+        ts_code = f"{symbol}.SH" if symbol.startswith("000") else f"{symbol}.SZ"
+        rows, end = [], dt.date.today()
+        cur = pd.Timestamp(start)
+        while cur.date() <= end:                     # 按年分段拉，单次返回有行数上限
+            nxt = min(cur + pd.DateOffset(years=1) - pd.Timedelta(days=1), pd.Timestamp(end))
+            r = requests.post("http://api.tushare.pro", json={"api_name": "index_weight", "token": token, "fields": "",
+                                                               "params": {"index_code": ts_code, "start_date": f"{cur:%Y%m%d}", "end_date": f"{nxt:%Y%m%d}"}},
+                              timeout=30).json()
+            if r.get("code"):
+                raise RuntimeError(f"Tushare index_weight：{r.get('msg')}")
+            rows += [dict(zip(r["data"]["fields"], it)) for it in r["data"]["items"]]
+            cur = nxt + pd.Timedelta(days=1)
+        w = pd.DataFrame(rows)
+        pd.DataFrame({"date": pd.to_datetime(w["trade_date"]), "code": w["con_code"].str[:6],
+                      "weight": w["weight"].astype(float) / 100}).to_parquet(p)
+    return pd.read_parquet(p)
+
+
 # ---- 基本面（业绩报表）：披露截止日之后才能用 ----
 DEADLINE = {"0331": "0430", "0630": "0831", "0930": "1031", "1231": "0430"}
 

@@ -382,7 +382,8 @@ def fund_overview(code: str):
     snap = FDB.df("select date, metrics from risk_snapshots where product = :p order by date desc limit 1", p=code)
     rec = FDB.df("select date, status, diff, explained from reconciliation where product = :p order by date desc limit 10", p=code)
     flows = FDB.df("select date, type, amount, shares, nav from flows where product = :p order by date", p=code)
-    open_events = FDB.df("select count(*) as n from limit_events where product = :p and handled_by is null", p=code)["n"].iloc[0]
+    from cyron_veritas.fund import risk as FR
+    open_events = len(FR.episodes(code))
     metrics = snap["metrics"].iloc[0] if len(snap) else {}
     if isinstance(metrics, str):
         metrics = json.loads(metrics)
@@ -395,16 +396,24 @@ def fund_overview(code: str):
 
 
 @app.get("/api/fund/{code}/events")
-def fund_events(code: str, only_open: bool = True, limit: int = 200):
-    from cyron_veritas.fund import db as FDB
+def fund_events(code: str, only_open: bool = True):
+    """风控事件：同一规则连续触发的逐日记录合并为一个区间。"""
+    from cyron_veritas.fund import risk as FR
 
-    q = "select * from limit_events where product = :p" + (" and handled_by is null" if only_open else "") + " order by date desc, id desc limit :n"
-    return _jsonable(FDB.df(q, p=code, n=limit).to_dict("records"))
+    return _jsonable(FR.episodes(code, only_open))
 
 
 class HandleReq(BaseModel):
     handled_by: str
     note: str
+    ids: list[int] = []
+
+
+@app.post("/api/fund/{code}/events/handle")
+def fund_events_handle(code: str, req: HandleReq):
+    from cyron_veritas.fund import risk as FR
+
+    return {"ok": True, "n": FR.handle_events(code, req.ids, req.handled_by, req.note)}
 
 
 @app.post("/api/fund/{code}/events/{eid}/handle")
@@ -437,7 +446,7 @@ def fund_attribution(code: str):
 
     b = PF.brinson(code)
     s = PF.style_exposure(code)
-    return _jsonable({"brinson": b.to_dict("records"), "brinson_total": b.drop(columns=["month", "超配最多", "低配最多"]).sum().to_dict(),
+    return _jsonable({"brinson": b.to_dict("records"), "brinson_total": b.drop(columns=["month", "超配最多", "低配最多", "基准权重来源"]).sum().to_dict(),
                       "style": s.reset_index().rename(columns={"index": "factor"}).to_dict("records")})
 
 

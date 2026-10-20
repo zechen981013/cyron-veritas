@@ -97,3 +97,7 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 # ===== end portfolio-secure baseline =====
+
+# 资管中台：行情缓存和模拟器每次重跑都会重新生成的估值表，不进仓库
+data/fund_md/
+data/valuation_sheets/

@@ -4,9 +4,11 @@ Brinson（BHB，单期算术，按月）：
   配置效应 = Σ (组合行业权重 − 基准行业权重) × (基准行业收益 − 基准总收益)
   选股效应 = Σ 基准行业权重 × (组合行业收益 − 基准行业收益)
   交互效应 = Σ (组合行业权重 − 基准行业权重) × (组合行业收益 − 基准行业收益)
-  基准总收益 = 沪深300 指数实际涨跌；基准行业收益 = 申万一级行业指数涨跌（指数本身，没有幸存者偏差）；
-  基准行业权重 = 沪深300 最新成分权重（历史权重需付费数据）。最新权重 × 行业指数拼出的模型基准与真实指数的差，单列「基准近似误差」。
-  （第一版曾用「当前成分股」倒推行业收益，33 个月基准收益累加到 96%、而指数实际只涨 23%——幸存者偏差，已弃用。）
+  基准总收益 = 沪深300 指数实际涨跌；基准行业权重 / 行业收益 = 月初沪深300 成分股按申万一级归类、成分股当月总收益按权重平均。
+  月初成分权重优先用 Tushare 历史权重（精确）；没有 token 时用最新权重按个股总收益倒推（漂移调整，仍有幸存者偏差）。
+  成分股拼出的模型基准与真实指数之差（分红再投资 + 幸存者偏差）单列「基准近似误差」。
+  （试过用申万一级行业指数做基准行业收益：申万指数覆盖全 A 股、含大量小盘股，和沪深300 成分股表现差得远，
+   33 个月近似误差累计 25%，弃用。）
   组合行业收益用月初持仓在当月的总收益（含分红送转）计算——即买入持有假设，月内调仓造成的差异计入「其他（交易与现金）」。
 
 风格暴露（月末，截面 z 分数，股票池 = 中证 800，1%/99% 缩尾）：
@@ -49,16 +51,30 @@ def nav_metrics(code: str, benchmark: str = "sh000300") -> dict:
             "monthly": table}
 
 
-def brinson(code: str) -> pd.DataFrame:
-    """月度 Brinson。基准总收益 = 沪深300 指数实际涨跌；基准行业收益 = 申万一级行业指数涨跌；基准行业权重 = 沪深300 最新成分权重（近似）。
-    最新权重 × 行业指数拼出的「模型基准」与真实指数之间的差单列为「基准近似误差」，不混进配置 / 选股效应。"""
+def _bench_weights(d0: pd.Timestamp, hist: pd.DataFrame | None, latest: pd.Series, tri: pd.DataFrame) -> tuple[pd.Series, str]:
+    """d0 时点的基准成分权重。有历史权重（Tushare）就取 d0 之前最近一期；否则用最新权重按各股总收益倒推回 d0（漂移调整），
+    仍有幸存者偏差（期间被调出的股票不在里面），偏差进「基准近似误差」。"""
+    if hist is not None:
+        snap = hist[hist["date"] <= d0]
+        if len(snap):
+            w = snap[snap["date"] == snap["date"].max()].set_index("code")["weight"]
+            return w / w.sum(), "成分股历史权重"
+    codes = latest.index.intersection(tri.columns)
+    w = latest[codes] * tri.loc[:d0].iloc[-1][codes] / tri.iloc[-1][codes]
+    return w.dropna() / w.sum(), "最新成分权重倒推"
+
+
+def brinson(code: str, hist_weights: pd.DataFrame | None = "auto") -> pd.DataFrame:
+    """月度 Brinson（BHB）。基准总收益 = 沪深300 指数实际涨跌。
+    基准行业权重与行业收益来自沪深300 成分股：月初成分权重按申万一级归类，行业收益 = 成分股当月总收益按权重平均。
+    月初成分权重：有 Tushare 历史权重时精确取当期；没有时用最新权重倒推（见 _bench_weights）。
+    由成分股拼出的「模型基准」与真实指数之差（分红再投资 + 幸存者偏差）单列「基准近似误差」，不混进配置 / 选股效应。"""
     mv = R.market_view()
     ret = mv["ret"]
+    tri = (1 + ret.fillna(0)).cumprod()
     ind = M.sw_industry()
-    bw = M.index_weights("000300")
-    wb_all = bw.groupby(bw.index.map(lambda c: ind.get(c, "未分类"))).sum()
-    wb_all = wb_all / wb_all.sum()
-    sw = M.sw_index_close()
+    latest = M.index_weights("000300")
+    hist = M.index_weights_hist("000300") if isinstance(hist_weights, str) else hist_weights
     idx = M.index_close("sh000300")
     nav = R.nav_series(code)
     month_ends = nav.index.to_series().groupby(nav.index.to_period("M")).last()
@@ -70,14 +86,19 @@ def brinson(code: str) -> pd.DataFrame:
         if h.empty:
             continue
         period = ret.loc[(ret.index > d0) & (ret.index <= d1)]
-        cum = (1 + period.fillna(0)).prod() - 1                          # 持仓股票当月总收益（含分红送转）
+        cum = (1 + period.fillna(0)).prod() - 1                          # 当月总收益（含分红送转）
         pw = h.set_index("code")["mv"] / net
         g = pw.groupby(pw.index.map(lambda c: ind.get(c, "未分类")))
         wp = g.sum()
         rp = g.apply(lambda s: float((s * cum.reindex(s.index).fillna(0)).sum() / s.sum()))
-        rb = sw.loc[:d1].iloc[-1] / sw.loc[:d0].iloc[-1] - 1                # 申万行业指数当月涨跌
-        allidx = wp.index.union(wb_all.index)
-        wp_, wb_, rp_, rb_ = (x.reindex(allidx).fillna(0) for x in (wp, wb_all, rp, rb.reindex(allidx)))
+        bw, method = _bench_weights(d0, hist, latest, tri)
+        bw = bw[bw.index.isin(cum.index)]
+        bw = bw / bw.sum()
+        bg = bw.groupby(bw.index.map(lambda c: ind.get(c, "未分类")))
+        wb = bg.sum()
+        rb = bg.apply(lambda s: float((s * cum.reindex(s.index).fillna(0)).sum() / s.sum()))
+        allidx = wp.index.union(wb.index)
+        wp_, wb_, rp_, rb_ = (x.reindex(allidx).fillna(0) for x in (wp, wb, rp, rb))
         rp_ = rp_.where(wp_ > 0, rb_)
         rb_model = float((wb_ * rb_).sum())
         rb_actual = float(idx.loc[:d1].iloc[-1] / idx.loc[:d0].iloc[-1] - 1)
@@ -88,7 +109,7 @@ def brinson(code: str) -> pd.DataFrame:
         rows.append({"month": str(d1.to_period("M")), "组合收益": port_ret, "基准收益": rb_actual, "超额": port_ret - rb_actual,
                      "配置效应": alloc, "选股效应": select, "交互效应": inter,
                      "其他（交易与现金）": port_ret - rb_model - alloc - select - inter, "基准近似误差": rb_model - rb_actual,
-                     "超配最多": (wp_ - wb_).idxmax(), "低配最多": (wp_ - wb_).idxmin()})
+                     "超配最多": (wp_ - wb_).idxmax(), "低配最多": (wp_ - wb_).idxmin(), "基准权重来源": method})
     return pd.DataFrame(rows)
 
 

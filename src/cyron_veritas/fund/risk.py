@@ -194,3 +194,31 @@ def pretrade(code: str, d, orders: list[dict]) -> dict:
            "pass": all(r["pass"] for r in results) and not port_checks}
     db.add(db.orders, {"product": code, "date": d.date(), "orders": orders, "result": res, "created_at": dt.datetime.now()})
     return res
+
+
+def episodes(code: str, only_open: bool = True) -> list[dict]:
+    """把逐日事件按规则合并成「连续触发区间」：同一规则在相邻交易日连续触发算一次事件，风控岗按区间处理、一次留痕。"""
+    q = "select * from limit_events where product = :p" + (" and handled_by is null" if only_open else "") + " order by rule, date"
+    ev = db.df(q, p=code)
+    if ev.empty:
+        return []
+    days = pd.to_datetime(db.df("select date from nav where product = :p order by date", p=code)["date"])
+    pos = {d.date(): i for i, d in enumerate(days)}
+    ev["date"] = pd.to_datetime(ev["date"]).dt.date
+    ev["i"] = ev["date"].map(pos)
+    ev["ep"] = ((ev["rule"] != ev["rule"].shift()) | (ev["i"].diff() != 1)).cumsum()
+    out = []
+    for _, g in ev.groupby("ep"):
+        worst = BREACH if (g["status"] == BREACH).any() else WARN
+        peak = g["value"].min() if g["rule"].iloc[0] in ("cash_min", "liquidity_5d_min", "warning_line", "stop_line") else g["value"].max()
+        out.append({"ids": g["id"].tolist(), "rule": g["rule"].iloc[0], "status": worst, "start": str(g["date"].iloc[0]), "end": str(g["date"].iloc[-1]),
+                    "days": len(g), "peak": float(peak), "limit": float(g["limit"].iloc[-1]), "detail": g["detail"].iloc[-1],
+                    "handled_by": g["handled_by"].iloc[-1], "note": g["note"].iloc[-1]})
+    return sorted(out, key=lambda e: e["end"], reverse=True)
+
+
+def handle_events(code: str, ids: list[int], handled_by: str, note: str) -> int:
+    with db.engine().begin() as c:
+        r = c.execute(db.limit_events.update().where(db.limit_events.c.product == code).where(db.limit_events.c.id.in_(ids))
+                      .values(handled_by=handled_by, handled_at=dt.datetime.now(), note=note))
+    return r.rowcount

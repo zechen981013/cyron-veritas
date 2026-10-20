@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,6 +49,27 @@ class Commentary(BaseModel):
     outlook: str = Field(description="下月关注与组合应对，2 句；不承诺收益、不给个股推荐")
 
 
+POS_WORDS = ("正贡献", "贡献为正", "正向贡献", "跑赢", "领先基准", "增厚")
+NEG_WORDS = ("拖累", "负贡献", "贡献为负", "跑输", "落后基准", "侵蚀")
+EXCESS_WORDS = ("跑赢", "跑输", "领先基准", "落后基准")          # 没写「超额」但说的就是超额
+
+
+def check_direction(text: str, signs: dict[str, float]) -> list[str]:
+    """方向词校验：数字由占位符保证正确，但「配置效应拖累」这类定性判断可能与数字相反。
+    按逗号句号切分句，句中出现某项名称（配置 / 选股 / 交互 / 超额）和方向词时，方向必须与该项数值的符号一致。"""
+    errors = []
+    for clause in re.split(r"[，。；,;！？\n]", text):
+        pos, neg = any(w in clause for w in POS_WORDS), any(w in clause for w in NEG_WORDS)
+        if pos == neg:          # 没有方向词，或正负词同句无法判断
+            continue
+        terms = [t for t in signs if t in clause] or (["超额"] if any(w in clause for w in EXCESS_WORDS) else [])
+        for term in terms:
+            v = signs[term]
+            if v is not None and ((pos and v < 0) or (neg and v > 0)):
+                errors.append(f"「{clause.strip()}」：{term} 实际为 {v:+.2%}")
+    return errors
+
+
 def build(code: str, month: str, with_llm: bool = True) -> dict:
     cfg = P.load(code)
     nav = R.nav_series(code)
@@ -86,6 +108,8 @@ def build(code: str, month: str, with_llm: bool = True) -> dict:
     table = "\n".join(f"{{{{{k}}}}} | {lab} | {val}" for k, (lab, val) in facts.items())
     names = " ".join(v for _, v in facts.values() if not any(ch.isdigit() for ch in v)) + " 沪深300 中证500 中证800"  # 指数名称里的数字不算数据
 
+    signs = {"配置": a["配置效应"] if a is not None else None, "选股": a["选股效应"] if a is not None else None,
+             "交互": a["交互效应"] if a is not None else None, "超额": m_ret - mb_ret}
     comm, check = None, None
     if with_llm:
         model = chat_model(0.3).with_structured_output(Commentary, method="function_calling")
@@ -93,10 +117,14 @@ def build(code: str, month: str, with_llm: bool = True) -> dict:
                            "不承诺收益、不推荐个股、不出现买入卖出等措辞。"), ("user", f"产品：{cfg['name']}，报告月份：{month}\n【事实表】\n{table}")]
         for _ in range(2):
             comm = model.invoke(msgs).model_dump()
-            check = check_placeholders("\n".join(comm.values()), facts, names)
+            text = "\n".join(comm.values())
+            check = check_placeholders(text, facts, names)
+            check["direction_errors"] = check_direction(text, signs)
+            check["ok"] = check["ok"] and not check["direction_errors"]
             if check["ok"]:
                 break
-            msgs.append(("user", f"未通过校验：未知键 {check['unknown_keys']}，占位符外的数字 {check['raw_numbers']}。请重写。"))
+            msgs.append(("user", f"未通过校验：未知键 {check['unknown_keys']}，占位符外的数字 {check['raw_numbers']}，"
+                                 f"方向与数据相反 {check['direction_errors']}。请重写。"))
     comm_html = {k: fill(v, facts, html=True) for k, v in (comm or {}).items()}
 
     # 图
