@@ -15,7 +15,7 @@ PORTFOLIO_DIR = ROOT / "portfolio"
 BASE_CCY = "CNY"
 
 
-def chat_model(temperature: float = 0.2):
+def chat_model(temperature: float = 0.2, max_tokens: int | None = None):
     """DeepSeek（OpenAI 兼容接口）。换 vLLM 或其他模型只需改 .env 里的 LLM_BASE_URL / LLM_MODEL。"""
     from langchain_openai import ChatOpenAI
 
@@ -26,4 +26,5 @@ def chat_model(temperature: float = 0.2):
         temperature=temperature,
         timeout=float(os.getenv("LLM_TIMEOUT", "120")),
         max_retries=2,
+        **({"max_tokens": max_tokens} if max_tokens else {}),
     )

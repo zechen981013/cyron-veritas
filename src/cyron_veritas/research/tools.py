@@ -58,7 +58,9 @@ def financials_summary(ticker: str) -> dict:
     avg = {f"avg3_{k}": _r(last3[k].mean(), 3) for k in ["revenue_growth", "ebit_margin", "tax_rate", "da_pct", "capex_pct", "nwc_pct", "roe"]}
     return {"company": fin["name"], "ticker": ticker, "market": fin.get("market", "A"), "is_financial": fin["is_financial"],
             "unit": f"亿{fin.get('currency', 'CNY')}（报表币种；比率为小数）", "currency_note": fin.get("currency_note", ""),
-            "latest_year": int(t.index[-1]), "years": years, **avg, "source": fin["source"]}
+            "latest_year": int(t.index[-1]), "years": years, **avg, "source": fin["source"],
+            "cash_note": "cash = 货币资金 + 交易性金融资产（DCF 默认加回的现金）；cash_like_other = 一年内到期的非流动资产 + 其他流动资产 + 其他非流动资产 + 其他非流动金融资产，"
+                         "是否属于存款 / 理财需到年报附注核实，默认不计入估值"}
 
 
 def market_snapshot(ticker: str) -> dict:
@@ -132,6 +134,7 @@ def dcf_run(ticker: str, scenario: str, revenue_growth: list[float], ebit_margin
     price = snap["price"]
     sens = D.sensitivity(x)
     proj = v["projection"]
+    implied = D.implied_growth(x, price)
     return {"ok": True, "scenario": scenario, "per_share": _r(v["per_share"], 2), "price": price,
             "currency": snap["price_currency"], "statement_currency": snap["statement_currency"], "fx_statement_to_price": snap["fx_statement_to_price"],
             "vs_price": _r(v["per_share"] / price - 1, 3), "enterprise_value": _r(v["enterprise_value"], 1),
@@ -141,10 +144,28 @@ def dcf_run(ticker: str, scenario: str, revenue_growth: list[float], ebit_margin
             "revenue_by_year": {int(y): _r(r, 1) for y, r in proj["revenue"].items()},
             "sensitivity_per_share": {f"wacc={w:.3f}": {f"g={g:.3f}": _r(val, 1) for g, val in row.items()}
                                       for w, row in sens.iterrows()},
+            "cash_in_valuation": _r(x.cash, 1), "extra_cash_in_valuation": _r(x.extra_cash, 1),
+            "cash_note": "估值里加回的现金 = cash（货币资金 + 交易性金融资产）+ extra_cash；财务数据里的 cash_like_other 默认没有计入，只有填了 extra_cash 才会加回",
+            "reverse_dcf_implied_growth": _r(implied, 4),
+            "reverse_dcf_note": "其他假设不变，预测期每年收入增速为多少时每股价值正好等于现价（市场隐含增速）；与本情景假设、历史增速对比即为预期差",
             "net_debt": _r(x.debt - x.cash, 1), "extra_cash": _r(x.extra_cash, 1), "minority": _r(x.minority, 1), "shares": _r(x.shares, 2),
             "assumptions": {"revenue_growth": revenue_growth, "ebit_margin": ebit_margin, "tax_rate": tax_rate,
                             "da_pct": da_pct, "capex_pct": capex_pct, "nwc_pct": nwc_pct, "wacc": wacc,
                             "terminal_growth": terminal_growth, "extra_cash": extra_cash}}, x
+
+
+def quality_review(ticker: str) -> dict:
+    """利润质量审查：杜邦、Piotroski、Altman Z、Beneish、应计比率 → A–D 利润可信度评级（规则计算，公式与 FinanceToolkit 交叉验证过）。"""
+    from cyron_veritas.valuation import quality as Q
+
+    ticker = F.market_of(ticker)[1]
+    a = F.annual(ticker)
+    mcap = None
+    try:
+        mcap = market_snapshot(ticker)["market_cap"]
+    except Exception:
+        pass
+    return {"company": a["name"], "ticker": ticker, "unit": a.get("unit", "亿"), **Q.review(a["table"], mcap, a["is_financial"])}
 
 
 def fin_summary(ticker: str) -> dict:
@@ -287,6 +308,8 @@ def make_tools(ledger: Ledger) -> dict[str, StructuredTool]:
         "run_fin_valuation": wrap("run_fin_valuation", fin_run, FinValArgs,
                                   "金融企业估值：PB-ROE（合理 P/B =（ROE−g）/（Ke−g））和两阶段 DDM，返回每股价值、相对现价、敏感性表。假设不合理会返回错误。",
                                   post=dcf_post),
+        "get_quality_review": wrap("get_quality_review", quality_review, TickerArgs,
+                                   "利润质量审查：杜邦分析（三步、五步）、Piotroski F 分、Altman Z 分、Beneish M 分、应计比率，给出 A–D 利润可信度评级和扣级原因。估值前必须先做。"),
         "search_annual_report": wrap("search_annual_report", annual_report_search, ReportArgs,
                                      "在公司最新年报原文里检索（混合检索 + 重排），返回原文片段、章节和页码。用于核实业务结构、科目明细、风险披露。"),
     }

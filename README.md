@@ -101,6 +101,12 @@ flowchart TB
   批准 / 修改后重算 / 驳回；修改会用新假设重新计算并记入证据账本，审批人、意见和前后对比写进备忘录，Excel 按审批后的假设生成，驳回则不出 Excel。
   （审批放在外层图而不是 DeepAgents 内部：子 Agent 在工具调用里嵌套运行，在那里暂停恢复不稳定。）
 - **Excel 模型是真公式**（蓝色输入 / 黑色公式）：DCF 模型和 PB-ROE / DDM 模型都是；改假设页，估值和敏感性自动重算；测试里用 `formulas` 库重算工作簿，和 Python 引擎一致到小数点后 9 位。
+- **估值前先做利润质量审查**：杜邦三步 / 五步、Piotroski F 分（9 项）、Altman Z（制造业原版与 Z''）、Beneish M 分（8 变量）、应计比率，
+  由代码按规则给出 **A–D 利润可信度评级**（Beneish > −1.78 扣 2 级；应计比率 > 10%、经营现金流 / 净利 < 0.8、Piotroski ≤ 3 各扣 1 级）；
+  C 级结论只能「观望」，D 级不能给正面结论。评级不交给大模型判断。
+- **反向 DCF（预期差）**：其他假设不变，求出让每股价值等于现价的收入增速，和我们的假设、历史增速放进同一张「预期差表」。
+- **备忘录九章结构**（参考 [equity-research-skill](https://github.com/rollingSirius/equity-research-skill) 的机构研究框架）：一页摘要（结论框 + 预期差表）、
+  公司与业务、竞争格局、管理层与资本配置、财务分析与利润质量审查、估值、催化剂与风险、**反方观点与事前验尸**、待核实问题；章节缺失时如实标注。
 - **护栏**：模型调用、工具调用、派活次数都有上限；假设不合理（如永续增长率 ≥ WACC、g ≥ ROE）工具直接拒绝；
   模型推理加锁（MPS 不支持多线程同时提交计算，多个子 Agent 并行检索曾导致 Metal 断言崩溃）。
 - **为什么风控用 LangGraph、研究用 DeepAgents**：日报步骤固定、要求稳定可复核 → 固定流程；研究是开放任务（查什么、查几轮、发现异常要不要追问）→ 让 Agent 自己列计划、派子 Agent。
@@ -136,6 +142,20 @@ flowchart LR
 
 四个页面：组合风控（选持仓 → 生成日报，显示流程与校验结果）、研究备忘录（实时显示 Agent 在做什么、估值假设审批表单、下载 Excel 模型）、
 年报问答（入库新年报、流式回答、点页码看原文 / 打开 PDF 对应页）、业绩会纪要（选交流记录或上传录音，生成纪要并与上一次对比）。长任务在后台线程运行，前端通过 SSE 订阅进度。
+
+## 与业界开源库交叉验证
+
+自研的估值、风险和利润质量计算，用同样的输入和成熟开源库逐项对答案（`tests/test_cross_validation.py`，10 项全部通过）：
+
+| 自研实现 | 对照库 | 结果 |
+|---|---|---|
+| DCF（FCFF） | [FinanceToolkit](https://github.com/JerBouma/FinanceToolkit) `get_intrinsic_value` | 一致（相对误差 < 1e-9） |
+| 两阶段 DDM | FinanceToolkit `get_two_stage_dividend_discount_model` | 一致 |
+| PB-ROE | FinanceToolkit 戈登增长模型 | 一致（约定差异：PB-ROE 用当期净资产 × ROE 作下一年利润，相差 (1+g)，测试中写明） |
+| CAPM 股权成本 | FinanceToolkit `get_capital_asset_pricing_model` | 一致 |
+| 杜邦三步 / 五步、Altman Z、Piotroski 各项 | FinanceToolkit `dupont_model` / `altman_model` / `piotroski_model` | 一致 |
+| VaR、CVaR、最大回撤、年化波动率、Beta | [empyrical](https://github.com/stefan-jansen/empyrical-reloaded) | 一致 |
+| 反向 DCF | 自洽性：用某增速算出价格，再反推回同一增速 | 一致 |
 
 ## 样例结果（2026-10-20，真实模型 DeepSeek）
 
@@ -174,7 +194,7 @@ uv run veritas calls 000333       # 最新一次投资者交流纪要，并与�
 uv run veritas transcribe call.m4a --company 某公司   # 录音 → 纪要
 uv run veritas mcp                # MCP Server（stdio）
 uv run python -m cyron_veritas.rag.evaluate --qa   # 年报问答评测
-uv run pytest -q                  # 38 个测试
+uv run pytest -q                  # 48 个测试（含与 FinanceToolkit / empyrical 的交叉验证）
 ```
 
 向量和重排模型默认读 `~/models/bge-m3`、`~/models/bge-reranker-v2-m3`，不存在则从 HuggingFace 下载（`EMBED_MODEL` / `RERANK_MODEL` 可覆盖）。
@@ -186,7 +206,7 @@ uv run pytest -q                  # 38 个测试
 src/cyron_veritas/
   data/        market.py（行情、汇率、国债收益率，按天缓存）  financials.py（A 股三表 → 统一口径）
   risk/        metrics.py（纯函数）  portfolio.py  limits.py  report_graph.py（LangGraph）
-  valuation/   dcf.py（FCFF、WACC、敏感性）  fin.py（PB-ROE、DDM）  excel.py（公式模型导出）
+  valuation/   dcf.py（FCFF、WACC、敏感性、反向 DCF）  fin.py（PB-ROE、DDM）  quality.py（杜邦、Piotroski、Altman、Beneish、A–D 评级）  excel.py
   rag/         filings.py（下载、解析、切块）  index.py（Milvus Lite + BM25 + 重排）  qa.py（带页码问答与校验）  evaluate.py
   research/    tools.py（工具 + 证据账本）  agent.py（DeepAgents 主 / 子 Agent + 外层审批流程）
   calls/       source.py（记录表解析、Whisper 转写）  analyze.py（抽取、引用校验、对比）  run.py
@@ -205,7 +225,9 @@ EBIT = 利润总额 + 利息费用 − 利息收入；有息负债含租赁负�
 
 ## 已知局限
 
-- 研究备忘录是长文本，仍用「数字能在证据账本中找到」做溯源（约 97%–99%），没有像风控日报那样做到结构化引用。
+- 研究备忘录是长文本，仍用「数字能在证据账本中找到」做溯源（九章结构下约 94%：预期差和事前验尸里 Agent 自己做了加减运算），
+  没有像风控日报那样做到结构化引用；溯源也检查不出「算式写错」（实测出现过一次括号里的加减式与结果不符）。
+- 类现金资产的计入：Agent 会到年报附注核实，但实测仍可能把全部候选金额（而非附注确认的部分）填进 extra_cash，需要人工审批把关。
 - 港股 / 美股：没有年报原文检索；美股只支持美元报告公司（中概 ADR 的人民币报表和 ADS 比例未处理）；港美股金融企业暂不支持。
 - 银行估值没有用到不良率、拨备覆盖率等资产质量指标的量化调整（Agent 从年报中引用，但不进入模型）；CAPM 在当前低利率下给出的 Ke 偏低，需要人工审批把关。
 - 审批流程的检查点存在内存（MemorySaver），服务重启后未完成的审批会丢失；生产环境应换成 SQLite / Postgres checkpointer。

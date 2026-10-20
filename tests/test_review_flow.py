@@ -55,4 +55,4 @@ def test_review_event_sent_once(fake):
 
 def test_without_review_marks_unreviewed(fake):
     done = A.run("000001", out_root=fake)
-    assert done["status"] == "done" and "未开启人工审批" in done["memo"]
+    assert done["status"] == "done" and "未开启人工审批" in done["memo"] and "附录：估值假设审批" in done["memo"]

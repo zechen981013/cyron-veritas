@@ -119,6 +119,16 @@ def _annual_hk(ticker: str, years: int) -> dict:
     t["total_assets"] = _col(wb, "总资产") / YI
     t["receivables"] = _col(wb, "应收帐款") / YI
     t["inventory"] = _col(wb, "存货") / YI
+    t["current_assets"] = _col(wb, "流动资产合计") / YI
+    t["current_liab"] = _col(wb, "流动负债合计") / YI
+    t["total_liab"] = _col(wb, "总负债") / YI
+    t["total_equity"] = _col(wb, "总权益") / YI
+    t["retained_earnings"] = _col(wb, "保留溢利(累计亏损)") / YI
+    t["fixed_assets"] = _col(wb, "物业厂房及设备", "固定资产") / YI
+    t["long_term_debt"] = _col(wb, "长期贷款", "应付票据(非流动)") / YI
+    t["net_profit"] = _col(wi, "除税后溢利") / YI
+    t["cogs"] = t["revenue"] - t["gross_profit"]
+    t["sga"] = _col(wi, "销售及分销费用", "行政开支") / YI
 
     ind = _cached(f"hkind_{ticker}", lambda: ak.stock_hk_financial_indicator_em(symbol=ticker))
     row = ind.iloc[0]
@@ -171,6 +181,16 @@ def _annual_us(ticker: str, years: int) -> dict:
     t["total_assets"] = _col(wb, "总资产") / YI
     t["receivables"] = _col(wb, "应收账款") / YI
     t["inventory"] = _col(wb, "存货") / YI
+    t["current_assets"] = _col(wb, "流动资产合计") / YI
+    t["current_liab"] = _col(wb, "流动负债合计") / YI
+    t["total_liab"] = _col(wb, "总负债") / YI
+    t["total_equity"] = _col(wb, "股东权益合计") / YI
+    t["retained_earnings"] = _col(wb, "留存收益") / YI
+    t["fixed_assets"] = _col(wb, "物业、厂房及设备") / YI
+    t["long_term_debt"] = _col(wb, "长期负债") / YI
+    t["net_profit"] = _col(wi, "净利润") / YI
+    t["cogs"] = t["revenue"] - t["gross_profit"]
+    t["sga"] = _col(wi, "营销费用", "其他营业费用") / YI
     t["shares"] = _col(wi, "基本加权平均股数-普通股") / YI
     t = _ratios(t)
     return {"name": name, "ticker": ticker, "market": "US", "currency": "USD", "table": t,
@@ -226,6 +246,17 @@ def _annual_a(ticker: str, years: int = 6) -> dict:
     t["total_assets"] = _get(bal, "TOTAL_ASSETS") / YI
     t["receivables"] = _get(bal, "ACCOUNTS_RECE") / YI
     t["inventory"] = _get(bal, "INVENTORY") / YI
+    # 利润质量模型（杜邦、Piotroski、Altman Z、Beneish）用到的科目
+    t["current_assets"] = _get(bal, "TOTAL_CURRENT_ASSETS") / YI
+    t["current_liab"] = _get(bal, "TOTAL_CURRENT_LIAB") / YI
+    t["total_liab"] = _get(bal, "TOTAL_LIABILITIES") / YI
+    t["total_equity"] = _get(bal, "TOTAL_EQUITY") / YI
+    t["retained_earnings"] = (_get(bal, "UNASSIGN_RPOFIT") + _get(bal, "SURPLUS_RESERVE")) / YI
+    t["fixed_assets"] = _get(bal, "FIXED_ASSET") / YI
+    t["long_term_debt"] = (_get(bal, "LONG_LOAN") + _get(bal, "BOND_PAYABLE")) / YI
+    t["net_profit"] = _get(inc, "NETPROFIT") / YI
+    t["cogs"] = _get(inc, "OPERATE_COST") / YI
+    t["sga"] = (_get(inc, "SALE_EXPENSE") + _get(inc, "MANAGE_EXPENSE")) / YI
 
     t = _ratios(t)
 

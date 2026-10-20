@@ -52,8 +52,8 @@ COMMON = """数字规则：所有数字必须直接来自工具返回结果，�
 比率在工具里是小数（0.102），写报告时写成百分比（10.2%）。金额单位是亿元。"""
 
 SUBAGENTS = {
-    "financial-analyst": (["get_financials", "get_market_data", "search_annual_report"],
-        {"get_financials": 2, "get_market_data": 2, "search_annual_report": 3},
+    "financial-analyst": (["get_financials", "get_market_data", "get_quality_review", "search_annual_report"],
+        {"get_financials": 2, "get_market_data": 2, "get_quality_review": 1, "search_annual_report": 3},
         "财务分析师：分析公司近 6 年财务表现和利润质量，返回带证据编号的发现。",
         f"""你是买方研究员里的财务分析师。用工具取数后，分析：
 1. 增长：收入增速的趋势和波动；
@@ -61,8 +61,10 @@ SUBAGENTS = {
 3. 利润质量：经营现金流 / 归母净利润（大于 1 说明利润含金量高）、应收和存货周转天数；
 4. 营运资本、资本开支、现金与有息负债；
 5. 异常：某一年突然跳变的指标，用 search_annual_report 到年报附注里查原因（例如「其他流动资产」「定期存款」「应收票据」），
-   引用年报页码说明；查不到就写「年报中未找到原因」，并提醒估值时如何处理。
-输出 5-8 条发现，每条一句结论 + 关键数字 + 证据编号。{COMMON}"""),
+   引用年报页码说明；查不到就写「年报中未找到原因」，并提醒估值时如何处理；
+6. 利润质量审查（必须做）：调用 get_quality_review，报告杜邦拆解（ROE 变化来自利润率、周转还是杠杆）、Piotroski F 分及失分项、
+   Altman Z（非制造业看 Z''）、Beneish M 分及异常变量、应计比率，以及代码给出的 A–D 利润可信度评级和扣级原因（评级不要自己改）。
+输出 6-10 条发现，每条一句结论 + 关键数字 + 证据编号。{COMMON}"""),
     "valuation-analyst": (["get_financials", "get_market_data", "get_wacc_inputs", "run_dcf", "search_annual_report"],
         {"get_financials": 2, "get_market_data": 2, "get_wacc_inputs": 2, "run_dcf": 4, "search_annual_report": 2},
         "估值分析师：基于历史数据定假设，计算 WACC，运行基准 / 乐观 / 悲观三个情景的 DCF，返回结果。",
@@ -71,10 +73,13 @@ SUBAGENTS = {
 2. 为基准情景定假设，每个假设都要锚定历史（例如「EBIT 利润率取近 3 年均值 10.1%」）或给出明确理由，写进 notes；
    营运资本比率波动大时用近 3 年均值；永续增长率不超过 3%；
    财务数据里 cash_like_other（其他类现金资产候选）较大时，用 search_annual_report 查「一年内到期的非流动资产」「其他非流动资产」附注，
-   能确认是定期存款 / 理财的部分填进 extra_cash（亿元，年报多为千元要换算），notes['extra_cash'] 写明科目、金额和页码；不能确认就填 0；
+   能确认是定期存款 / 理财的部分填进 extra_cash（亿元，年报多为千元要换算），notes['extra_cash'] 写明科目、金额和页码；不能确认就填 0。
+   注意口径：DCF 只加回 cash（货币资金 + 交易性金融资产），cash_like_other 默认不在估值里——不存在「已经包含、会重复计算」的问题；
 3. 运行 run_dcf 三次：scenario=base、bull、bear（乐观 / 悲观只调整收入增速和利润率，并说明调整理由）；
    如果工具返回假设错误，修改后重试；
-4. 返回：三个情景的每股价值和相对现价、终值占 EV 比重、敏感性范围、最关键的两个假设。{COMMON}"""),
+4. 预期差：run_dcf 结果里的 reverse_dcf_implied_growth 是现价隐含的收入增速，和基准假设、近 3 年实际增速对比，
+   说明市场在定价什么（比我们乐观还是悲观、差在哪个假设上）；
+5. 返回：三个情景的每股价值和相对现价、反向 DCF 隐含增速、终值占 EV 比重、敏感性范围、最关键的两个假设。{COMMON}"""),
     "filing-analyst": (["search_annual_report"], {"search_annual_report": 5},
         "年报研究员：从最新年报原文中提取业务结构、海外收入、战略、风险披露、股东回报等要点，每条附页码。",
         f"""你是年报研究员，只根据年报原文工作。用 search_annual_report 检索（最多 5 次），整理：
@@ -120,23 +125,31 @@ MAIN_PROMPT = f"""你是基金公司的研究主管，要为一家上市公司�
 工作方式：先用 write_todos 列出计划，再用 task 把工作分派给子 Agent（financial-analyst、valuation-analyst、industry-researcher），
 以及 filing-analyst（年报原文），最多派 {MAX_TASKS} 次任务；拿到结果后由你汇总成备忘录。你自己也可以调用 get_market_data 核对股价。
 
-备忘录用中文 Markdown，结构固定：
+备忘录用中文 Markdown，结构固定（参考机构研究的九章结构，围绕「预期差」组织，估值之前先做利润质量审查）：
 # 公司名（代码）研究备忘录
-## 一、结论摘要（3-4 句：DCF 基准情景每股价值与现价对比、估值区间、最关键的判断依据。不给买入 / 卖出建议，只陈述估值与风险）
-## 二、财务分析（增长、盈利、利润质量、营运资本与资本开支、异常项及年报中的解释）
-## 三、年报要点（业务结构、管理层判断、风险披露、股东回报；每条注明「年报 p.X」）
-## 四、估值（假设表：假设 | 取值 | 依据；三个情景结果表；敏感性范围；终值占比的提示）
-## 五、催化剂与风险
-## 六、需要进一步核实的问题（2-4 条）
-## 证据列表（证据编号 → 工具和用途，新闻附链接）
+## 一、一页摘要
+   - 结论框：估值区间与现价对比、利润可信度评级（A–D，照抄工具结果）、最关键的一个判断；不给买入 / 卖出建议
+   - 预期差表：| 关键变量 | 市场隐含（反向 DCF 或市场隐含 Ke） | 我们的假设 | 历史 | 差异原因 |
+## 二、公司与业务（业务结构、分地区 / 分产品收入，注明年报页码）
+## 三、竞争格局与护城河（份额、定价能力、成本优势；证据不足就写「未获取」）
+## 四、管理层与资本配置（分红、回购、增发、并购、关联交易；资本配置是否为股东创造价值）
+## 五、财务分析与利润质量审查（增长与盈利；杜邦拆解；Piotroski / Altman Z / Beneish / 应计比率；利润可信度评级与扣级原因；异常项及年报解释）
+## 六、估值（假设表：假设 | 取值 | 依据；三个情景结果；反向 DCF；敏感性范围；终值占比提示。金融企业用 PB-ROE 与 DDM，并对比市场隐含 Ke）
+## 七、催化剂与风险
+## 八、反方观点与事前验尸（最强的反方论点 2-3 条；假设一年后结论被证明错了，最可能的原因是什么；哪些数据出现时应改变看法）
+## 九、需要进一步核实的问题（2-4 条）
+## 证据列表（证据编号 → 工具和用途，新闻附链接；缺失的数据写「未获取」）
+利润可信度为 C 级时，结论只能写「需观望 / 待核实」；D 级不能给出任何正面结论。
+篇幅控制在 6000 字以内，多用表格，九章和证据列表必须全部写完（宁可每章短一点）；不要写算式推导，数字直接引用工具结果。
 
 {COMMON}
 不出现「买入」「卖出」「加仓」「减仓」「目标价」「推荐」等措辞。"""
 
 
 FIN_NOTE = """
-本公司是金融企业：估值一节改为「四、估值（PB-ROE 与 DDM：假设表；三个情景的 PB-ROE、DDM、平均每股价值和相对现价；当前与合理 P/B；敏感性范围）」，
-财务分析一节写盈利能力、收入结构、资产质量（不良率、拨备覆盖率、资本充足率注明年报页码）、资本与分红；不要写自由现金流和营运资本。"""
+本公司是金融企业：「六、估值」用 PB-ROE 与 DDM（假设表；三个情景的 PB-ROE、DDM、平均每股价值和相对现价；当前与合理 P/B；市场隐含 Ke 作为预期差）；
+「五、财务分析」写盈利能力、收入结构、资产质量（不良率、拨备覆盖率、资本充足率注明年报页码）、资本与分红；
+Piotroski / Altman / Beneish 不适用于金融企业，利润可信度评级写「不适用」；不要写自由现金流和营运资本。"""
 
 
 NON_A_NOTE = """
@@ -147,7 +160,7 @@ NON_A_NOTE = """
 def build(ledger: Ledger, model=None, financial: bool = False, market: str = "A"):
     from deepagents import create_deep_agent
 
-    model = model or chat_model(0.2)
+    model = model or chat_model(0.2, max_tokens=8192)  # 九章备忘录较长，默认输出上限会把后几章截掉
     tools = make_tools(ledger)
     spec = {**SUBAGENTS, **FIN_SUBAGENTS} if financial else dict(SUBAGENTS)
     if market != "A":  # 港美股没有年报检索
@@ -167,7 +180,7 @@ class ProgressHandler(BaseCallbackHandler):
 
     LABEL = {"write_todos": "列计划", "task": "派活给子 Agent", "get_financials": "取财报数据", "get_market_data": "取行情与 Beta",
              "get_wacc_inputs": "计算 WACC", "run_dcf": "运行 DCF", "search_news": "搜索新闻", "search_annual_report": "检索年报原文",
-             "get_fin_metrics": "取金融企业指标", "run_fin_valuation": "运行 PB-ROE / DDM"}
+             "get_fin_metrics": "取金融企业指标", "run_fin_valuation": "运行 PB-ROE / DDM", "get_quality_review": "利润质量审查"}
 
     def __init__(self, say):
         self.say = say
@@ -319,9 +332,9 @@ def _approval_section(ctx: dict, decision: dict, prop: dict, new: dict | None) -
     act = decision.get("action")
     who = decision.get("reviewer") or "分析师"
     if act == "auto":
-        return "\n\n## 七、估值假设审批\n本次运行未开启人工审批，估值结果为 Agent 建议值，正式使用前需分析师复核。\n"
+        return "\n\n## 附录：估值假设审批\n本次运行未开启人工审批，估值结果为 Agent 建议值，正式使用前需分析师复核。\n"
     head = {"approve": "已批准", "edit": "已修改后批准", "reject": "已驳回"}[act]
-    lines = [f"\n\n## 七、估值假设审批（{head}，{who}，{dt.datetime.now():%Y-%m-%d %H:%M}）", "",
+    lines = [f"\n\n## 附录：估值假设审批（{head}，{who}，{dt.datetime.now():%Y-%m-%d %H:%M}）", "",
              "| 假设 | Agent 建议 | 审批后 |", "|---|---|---|"]
     final = decision.get("assumptions") or {}
     for k, v in prop["assumptions"].items():
@@ -353,7 +366,12 @@ def node_finalize(state: FlowState) -> FlowState:
         new = json.loads(tool.invoke({"ticker": ticker, "scenario": "approved", **a, "notes": notes}))
         if new.get("ok"):
             final_inputs = ledger.dcf_runs[-1]["inputs"]
-    memo = ctx["memo"] + _approval_section(ctx, decision, prop, new) if prop.get("available") else ctx["memo"]
+    memo = ctx["memo"]
+    missing = [h for h in ("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "证据列表") if f"## {h}" not in memo]
+    if missing:  # 输出被截断或漏章：如实标出，不假装完整
+        memo += f"\n\n> ⚠️ 备忘录不完整：缺少章节 {', '.join(missing)}（可能是模型输出长度上限），请重跑或人工补全。\n"
+    if prop.get("available"):
+        memo += _approval_section(ctx, decision, prop, new)
 
     # 数字溯源：备忘录里的数字能否在证据账本里找到（证据编号、年份、小整数不计入）
     body = re.sub(r"\[E\d+\]|E\d+", "", memo)

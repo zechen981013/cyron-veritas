@@ -112,3 +112,29 @@ def wacc(rf: float, beta: float, erp: float, cost_of_debt: float, tax_rate: floa
 def blume_beta(raw: float) -> float:
     """Blume 调整：beta 向 1 回归（彭博默认做法）。"""
     return 0.67 * raw + 0.33
+
+
+def implied_growth(x: DCFInputs, price: float, lo: float = -0.30, hi: float = 0.60, tol: float = 1e-6) -> float | None:
+    """反向 DCF：其他假设不变，预测期每年收入增速取同一个值 g，求让每股价值 = 现价的 g（市场隐含增速）。
+    用来做「预期差」：市场价格隐含的增长 vs 我们的假设 vs 历史。区间内找不到解（如利润为负）返回 None。"""
+    n = len(x.revenue_growth)
+
+    def f(g: float) -> float:
+        y = DCFInputs(**{**asdict(x), "revenue_growth": [g] * n})
+        if y.terminal_growth >= y.wacc:
+            return float("nan")
+        return value(y)["per_share"] - price
+
+    a, b = f(lo), f(hi)
+    if np.isnan(a) or np.isnan(b) or a * b > 0:
+        return None
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        m = f(mid)
+        if abs(m) < tol * max(1.0, price):
+            return mid
+        if (m > 0) == (b > 0):
+            hi, b = mid, m
+        else:
+            lo, a = mid, m
+    return (lo + hi) / 2
