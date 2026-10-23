@@ -31,3 +31,20 @@ def sheet_dir(code: str) -> Path:
     p = ROOT / "data" / "valuation_sheets" / code
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+BENCH_NAMES = {"sh000300": "沪深300", "sh000905": "中证500", "sh000906": "中证800", "sh000852": "中证1000"}
+
+
+def bench_symbol(cfg: dict) -> str:
+    """业绩比较基准的指数行情代码（sh000300 / sh000905）。"""
+    return cfg["benchmark"]
+
+
+def bench_index(cfg: dict) -> str:
+    """基准指数代码（成分权重用，000300 / 000905）。"""
+    return str(cfg.get("benchmark_index") or cfg["benchmark"][2:])
+
+
+def bench_name(cfg: dict) -> str:
+    return BENCH_NAMES.get(cfg["benchmark"], cfg["benchmark"])

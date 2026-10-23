@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import datetime as dt
 import math
 
 import numpy as np
@@ -20,7 +19,7 @@ import pandas as pd
 from cyron_veritas.fund import db
 from cyron_veritas.fund import marketdata as M
 from cyron_veritas.fund import product as P
-from cyron_veritas.fund import sheet as S
+from cyron_veritas.fund.ledger import Ledger, fee
 
 ANNUALIZE = {"0331": 4.0, "0630": 2.0, "0930": 4 / 3, "1231": 1.0}
 
@@ -31,7 +30,7 @@ class Market:
     def __init__(self, codes: list[str]):
         b = M.bars(codes)
         self.close, self.high, self.low = M.wide(b, "close"), M.wide(b, "high"), M.wide(b, "low")
-        self.volume = M.wide(b, "volume") * 100  # 手 → 股
+        self.volume = M.wide(b, "volume")  # 股
         self.names = M.universe().set_index("code")["name"].to_dict()
         self.exchange = {c: "SH" if c.startswith("6") else "SZ" for c in codes}
         ca = M.corporate_actions(codes)
@@ -102,14 +101,6 @@ def select(mkt: Market, d: pd.Timestamp, prev: pd.Timestamp, cfg: dict, current:
     return picks, sent_back
 
 
-def _fee(cfg, side: str, amount: float) -> float:
-    t = cfg["trading"]
-    fee = max(amount * t["commission"], t["min_commission"]) + amount * t["transfer_fee"]
-    if side == "sell":
-        fee += amount * t["stamp_duty_sell"]
-    return fee
-
-
 def _breaches(mkt: Market, pos: dict, cash: float, recv: dict, payable: float, d, lim: dict) -> dict:
     """用上一交易日收盘价检查合同限额，返回超限项 {规则: 实际值}。"""
     mv = {c: p["qty"] * mkt.last_price(c, d) for c, p in pos.items()}
@@ -154,60 +145,26 @@ def run(code: str = "CV-VG1", end: str | None = None, write_sheets: bool = True,
     uni = M.universe()
     mkt = Market(uni["code"].tolist())
     cal = mkt.calendar[(mkt.calendar >= pd.Timestamp(cfg["inception"])) & (mkt.calendar <= pd.Timestamp(end or mkt.close.index[-1]))]
-    out_dir = P.sheet_dir(code)
-    for old in out_dir.glob("*.xlsx"):
-        old.unlink()
-    for t in (db.trades, db.flows, db.pool, db.ic):
-        db.replace_rows(t, [], t.c.product == code)
-
-    cash = float(cfg["initial_capital"])
-    shares = float(cfg["initial_capital"])
-    pos: dict[str, dict] = {}            # code → {qty, cost}
-    recv: dict[str, dict] = {}           # code → {amount, pay_date}
-    mgmt_pay = cust_pay = 0.0
-    prev_d, prev_unit, prev_net = None, 1.0, cash
-    flows = {pd.Timestamp(f["date"]): f for f in cfg.get("flows", [])}
-    pending_flows = sorted(flows)
+    L = Ledger(code, cfg, mkt, cal, write_sheets)
+    L.reset_outputs((db.pool, db.ic))
     core: set[str] = set()
-    trade_rows, flow_rows, pool_rows, ic_rows = [], [], [], []
+    pool_rows, ic_rows = [], []
     st = cfg["strategy"]
     lim = cfg["contract_limits"]
     last_month = None
     last_period = None
 
     for d in cal:
-        # 1) 应收股利到账（除息日的次一交易日）
-        for c in [c for c, r in recv.items() if r["pay_date"] <= d]:
-            cash += recv.pop(c)["amount"]
-        # 2) 公司行为：除权除息
-        for _, a in mkt.actions.get(d, pd.DataFrame()).iterrows() if d in mkt.actions else []:
-            c = a["code"]
-            if c in pos:
-                q0 = pos[c]["qty"]
-                if a["cash_per_share"] > 0:
-                    recv[c] = {"amount": recv.get(c, {}).get("amount", 0) + q0 * a["cash_per_share"], "pay_date": d + pd.Timedelta(days=1)}
-                if a["bonus_per_share"] > 0:
-                    pos[c]["qty"] = q0 + math.floor(q0 * a["bonus_per_share"])
-        # 3) 申购赎回（按上一交易日净值确认）
-        while pending_flows and pending_flows[0] <= d:
-            f = flows[pending_flows.pop(0)]
-            n = f["amount"] / prev_unit
-            if f["type"] == "subscribe":
-                cash += f["amount"]
-                shares += n
-            else:
-                shares -= n
-                cash -= f["amount"]
-            flow_rows.append({"product": code, "date": d.date(), "type": f["type"], "amount": f["amount"], "shares": n, "nav": prev_unit})
-        # 4) 调仓（每月第一个交易日；首日建仓）
+        L.start_day(d)
+        prev_d = L.prev_d
+        # 调仓（每月第一个交易日；首日建仓）
         rebalance = prev_d is None or d.month != last_month
         last_month = d.month
-        stop_hit = prev_unit < lim["stop_line"]
-        warn_hit = prev_unit < lim["warning_line"]
-        fix = _breaches(mkt, pos, cash, recv, mgmt_pay + cust_pay, prev_d, lim) if prev_d is not None and not rebalance else {}
-        if rebalance or stop_hit or fix or cash < -1:
-            mv = sum(p["qty"] * mkt.last_price(c, prev_d or d) for c, p in pos.items())
-            nav_now = cash + mv + sum(r["amount"] for r in recv.values()) - mgmt_pay - cust_pay
+        stop_hit = L.prev_unit < lim["stop_line"]
+        warn_hit = L.prev_unit < lim["warning_line"]
+        fix = _breaches(mkt, L.pos, L.cash, L.recv, L.payable(), prev_d, lim) if prev_d is not None and not rebalance else {}
+        if rebalance or stop_hit or fix or L.cash < -1:
+            nav_now = L.nav_at(prev_d or d)
             if stop_hit:
                 targets = {}
             elif rebalance:
@@ -237,87 +194,39 @@ def run(code: str = "CV-VG1", end: str | None = None, write_sheets: bool = True,
                 w = min((1 - st["cash_target"]) / max(1, len(picks)), st["max_weight"])
                 targets = {c: w for c in picks}
             else:  # 风控整改：上一交易日超限，今日按合同要求调回限额内（只卖不买）
-                targets = _fix_targets(mkt, pos, prev_d, nav_now, fix, st, lim)
+                targets = _fix_targets(mkt, L.pos, prev_d, nav_now, fix, st, lim)
+            reason = "止损清仓" if stop_hit else ("调仓" if rebalance else "风控整改：" + "、".join(fix))
             # 先卖后买
-            names = set(targets) if fix and not (rebalance or stop_hit) else set(pos) | set(targets)
+            names = set(targets) if fix and not (rebalance or stop_hit) else set(L.pos) | set(targets)
             for c in sorted(names, key=lambda c: targets.get(c, 0)):
                 if not mkt.tradable(c, d):
                     continue
                 px = float(mkt.close.at[d, c])
                 ref = px if not fix or rebalance else mkt.last_price(c, prev_d)   # 整改按昨收算目标股数，避免当日涨跌带来额外交易
                 tgt_qty = math.floor(targets.get(c, 0) * nav_now / ref / 100) * 100
-                cur = pos.get(c, {"qty": 0, "cost": 0.0})["qty"]
+                cur = L.qty(c)
                 delta = tgt_qty - cur
-                state = mkt.limit_state(c, d, prev_d)
-                if delta < 0 and state != "down":
-                    q_ = -delta if tgt_qty > 0 else cur
-                    price = px * (1 - cfg["trading"]["slippage"])
-                    amt = q_ * price
-                    fee = _fee(cfg, "sell", amt)
-                    cash += amt - fee
-                    p = pos[c]
-                    p["cost"] -= p["cost"] * q_ / p["qty"]
-                    p["qty"] -= q_
-                    if p["qty"] <= 0:
-                        pos.pop(c)
-                    trade_rows.append({"product": code, "date": d.date(), "code": c, "side": "sell", "qty": q_, "price": price, "amount": amt,
-                                       "fee": fee, "reason": "止损清仓" if stop_hit else ("调仓" if rebalance else "风控整改：" + "、".join(fix))})
+                if delta < 0 and mkt.limit_state(c, d, prev_d) != "down":
+                    L.sell(d, c, -delta if tgt_qty > 0 else cur, px * (1 - cfg["trading"]["slippage"]), reason)
             for c, w in targets.items():
                 if not mkt.tradable(c, d) or warn_hit or not rebalance:
                     continue
                 px = float(mkt.close.at[d, c])
-                tgt_qty = math.floor(w * nav_now / px / 100) * 100
-                cur = pos.get(c, {"qty": 0})["qty"]
-                delta = tgt_qty - cur
+                delta = math.floor(w * nav_now / px / 100) * 100 - L.qty(c)
                 if delta <= 0 or mkt.limit_state(c, d, prev_d) == "up":
                     continue
                 price = px * (1 + cfg["trading"]["slippage"])
-                amt = delta * price
-                fee = _fee(cfg, "buy", amt)
                 floor = (lim["cash_min"] + st["cash_target"]) / 2 * nav_now   # 买入后现金不低于（下限 + 目标）/ 2，给费用和赎回留缓冲
-                if amt + fee > cash - floor:
-                    delta = math.floor((cash - floor) / price / 100) * 100
+                if delta * price + fee(cfg, "buy", delta * price) > L.cash - floor:
+                    delta = math.floor((L.cash - floor) / price / 100) * 100
                     if delta <= 0:
                         continue
-                    amt, fee = delta * price, _fee(cfg, "buy", delta * price)
-                cash -= amt + fee
-                p = pos.setdefault(c, {"qty": 0, "cost": 0.0})
-                p["qty"] += delta
-                p["cost"] += amt + fee
-                trade_rows.append({"product": code, "date": d.date(), "code": c, "side": "buy", "qty": delta, "price": price, "amount": amt,
-                                   "fee": fee, "reason": "调仓"})
-        # 5) 费用计提（按自然日）、季末支付
-        days = (d - prev_d).days if prev_d is not None else 1
-        mgmt_pay += prev_net * cfg["fees"]["management"] * days / 365
-        cust_pay += prev_net * cfg["fees"]["custody"] * days / 365
-        nxt = cal[cal > d]
-        if len(nxt) and nxt[0].quarter != d.quarter:
-            cash -= mgmt_pay + cust_pay
-            mgmt_pay = cust_pay = 0.0
-        # 6) 估值（停牌沿用最近收盘价）与估值表
-        positions = [{"code": c, "name": mkt.names.get(c, c), "exchange": mkt.exchange[c], "qty": p["qty"], "cost": p["cost"],
-                      "price": mkt.last_price(c, d), "suspended": not mkt.tradable(c, d)} for c, p in pos.items()]
-        settlement = min(max(cash, 0) * 0.1, 2_000_000)
-        receivable = [{"code": c, "name": mkt.names.get(c, c), "amount": r["amount"]} for c, r in recv.items()]
-        fname = out_dir / f"{code}_估值表_{d:%Y%m%d}.xlsx"
-        if write_sheets:
-            summ = S.write(fname, cfg, d, positions, cash - settlement, settlement, receivable, mgmt_pay, cust_pay, shares)
-        else:
-            mv = sum(p["qty"] * p["price"] for p in positions)
-            net = cash + mv + sum(r["amount"] for r in receivable) - mgmt_pay - cust_pay
-            summ = {"net_assets": net, "unit_nav": round(net / shares, 4)}
-        prev_unit, prev_net, prev_d = summ["unit_nav"], summ["net_assets"], d
+                L.buy(d, c, delta, price, "调仓")
+        summ = L.end_day(d)
         if d.day <= 7 and d.dayofweek == 0:
-            say(f"  {d:%Y-%m-%d} 单位净值 {summ['unit_nav']:.4f} 规模 {summ['net_assets'] / 1e8:.2f} 亿 持仓 {len(pos)}")
+            say(f"  {d:%Y-%m-%d} 单位净值 {summ['unit_nav']:.4f} 规模 {summ['net_assets'] / 1e8:.2f} 亿 持仓 {len(L.pos)}")
 
-    db.add(db.trades, trade_rows)
-    db.add(db.flows, flow_rows)
+    L.finish()
     db.add(db.ic, ic_rows)
     db.add(db.pool, pool_rows)
-    db.replace_rows(db.products, [{"code": code, "name": cfg["name"], "type": cfg["type"], "config": _jsonable(cfg)}], db.products.c.code == code)
-    return {"days": len(cal), "final_unit_nav": prev_unit, "final_net_assets": prev_net, "trades": len(trade_rows), "sheets": str(out_dir)}
-
-
-def _jsonable(x):
-    import json
-    return json.loads(json.dumps(x, default=str))
+    return {"days": len(cal), "final_unit_nav": L.prev_unit, "final_net_assets": L.prev_net, "trades": len(L.trade_rows), "sheets": str(L.out_dir)}

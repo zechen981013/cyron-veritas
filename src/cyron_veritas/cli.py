@@ -27,6 +27,10 @@ def main(argv: list[str] | None = None) -> None:
     fd.add_argument("--date")
     fd.add_argument("--month", help="月报月份，如 2026-09")
     fd.add_argument("--orders", help="交易前检查的指令 JSON 文件：[{code, side, qty}]")
+    qt = sub.add_parser("quant", help="量化：因子检验、风险模型、超额归因")
+    qt.add_argument("action", choices=["research", "riskmodel", "attribution"])
+    qt.add_argument("product", nargs="?", default="CV-QE1")
+    qt.add_argument("--refresh", action="store_true", help="重算因子面板 / 因子收益（不用缓存）")
     w = sub.add_parser("serve", help="启动 Web 界面")
     w.add_argument("--port", type=int, default=8100)
     w.add_argument("--host", default="127.0.0.1")
@@ -46,8 +50,13 @@ def main(argv: list[str] | None = None) -> None:
         from cyron_veritas.fund import pipeline
 
         if a.action == "simulate":
-            from cyron_veritas.fund import simulate
-            print(simulate.run(a.product))
+            from cyron_veritas.fund import product as FP
+            if FP.load(a.product)["type"] == "quant_enhanced":
+                from cyron_veritas.quant import strategy
+                print(strategy.run(a.product))
+            else:
+                from cyron_veritas.fund import simulate
+                print(simulate.run(a.product))
         elif a.action == "backfill":
             print(pipeline.backfill(a.product))
         elif a.action == "daily":
@@ -63,6 +72,21 @@ def main(argv: list[str] | None = None) -> None:
             from cyron_veritas.fund import perf
             m = perf.nav_metrics(a.product)
             print(json.dumps({k: v for k, v in m.items() if k != "monthly"}, ensure_ascii=False, indent=2, default=str))
+        return
+    if a.cmd == "quant":
+        if a.action == "research":
+            from cyron_veritas.quant import research
+            r = research.run(refresh=a.refresh)
+            print(r["summary"].round(3).to_string())
+        elif a.action == "riskmodel":
+            from cyron_veritas.quant import riskmodel
+            fr, res = riskmodel.factor_returns(refresh=a.refresh)
+            print(f"因子收益 {fr.shape}，残差 {res.shape}")
+        elif a.action == "attribution":
+            from cyron_veritas.quant import attribution
+            d = attribution.decompose(a.product)
+            print(json.dumps(attribution.summary(d), ensure_ascii=False, indent=2))
+            print(attribution.bias_test(a.product).round(3).to_string())
         return
     if a.cmd == "mcp":
         from cyron_veritas.mcp_server import main as mcp_main

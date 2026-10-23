@@ -45,6 +45,14 @@ ic = Table("ic_decisions", meta, Column("id", Integer, primary_key=True, autoinc
 orders = Table("pretrade_checks", meta, Column("id", Integer, primary_key=True, autoincrement=True), Column("product", String(32)),
                Column("date", Date), Column("orders", JSON), Column("result", JSON), Column("created_at", DateTime, server_default=func.now()))
 
+# 量化产品每次调仓：优化结果与执行统计
+quant_rebalances = Table("quant_rebalances", meta, Column("id", Integer, primary_key=True, autoincrement=True), Column("product", String(32)),
+                         Column("date", Date), Column("exec_start", Date), Column("exec_end", Date), Column("status", String(32)),
+                         Column("relaxed", JSON), Column("ex_ante_te", Float), Column("exp_alpha", Float), Column("turnover", Float),
+                         Column("n_holdings", Integer), Column("member_weight", Float), Column("bench_source", String(32)), Column("exposure", JSON),
+                         Column("fill_rate", Float), Column("unfilled_value", Float), Column("traded_value", Float), Column("impact_bp", Float),
+                         Column("created_at", DateTime))
+
 _engine = None
 
 
@@ -78,4 +86,4 @@ def add(table: Table, rows: list[dict] | dict) -> None:
 
 
 __all__ = ["engine", "df", "replace_rows", "add", "select", "delete", "products", "nav", "holdings", "trades", "flows", "risk",
-           "limit_events", "reconcile", "pool", "ic", "orders"]
+           "limit_events", "reconcile", "quant_rebalances", "pool", "ic", "orders"]

@@ -13,6 +13,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import numpy as np
 import pandas as pd
 
 from cyron_veritas.config import ROOT
@@ -61,13 +62,13 @@ def _bars(code: str) -> pd.DataFrame | None:
     df = df.rename(columns={"date": "date"})
     df["date"] = pd.to_datetime(df["date"])
     df["code"] = code
-    # 腾讯接口：成交量单位是「手」（100 股），turnover 是换手率（小数）→ 流通股本 = 成交量 × 100 / 换手率
+    # turnover 是换手率（小数）；成交量单位不统一，见 _volume_in_shares
     df["turnover"] = pd.to_numeric(df.get("turnover"), errors="coerce")
     return df[["date", "code", "open", "close", "high", "low", "volume", "amount", "turnover"]]
 
 
 def bars(codes: list[str], refresh: bool = False) -> pd.DataFrame:
-    """不复权日线长表（date, code, open, close, high, low, volume[手], amount[元], turnover[换手率]）。"""
+    """不复权日线长表（date, code, open, close, high, low, volume[股], amount[元], turnover[换手率]）。"""
     p = _p("bars_raw")
     have = pd.read_parquet(p) if p.exists() else pd.DataFrame(columns=["date", "code"])
     have_codes = set(have["code"].unique())  # 只算一次（写在推导式里会对 70 多万行重复遍历 800 次）
@@ -86,7 +87,19 @@ def bars(codes: list[str], refresh: bool = False) -> pd.DataFrame:
             new = pd.concat(got)
             have = pd.concat([have[~have["code"].isin(new["code"].unique())], new]).sort_values(["code", "date"])
             have.to_parquet(p)
-    return have[have["code"].isin(codes)]
+    return _volume_in_shares(have[have["code"].isin(codes)])
+
+
+def _volume_in_shares(b: pd.DataFrame) -> pd.DataFrame:
+    """腾讯接口的成交量单位因股票而异：实测中证 800 里 706 只是「股」、93 只是「手」、1 只是「股 × 100」（同一只股票内一致）。
+    以成交额（元）为准：成交额 ÷ 典型价 ≈ 成交股数，按每只股票的数量级众数把 volume 统一换算成股。"""
+    b = b.copy()
+    est = b["amount"] / ((b["high"] + b["low"] + b["close"]) / 3)
+    ok = (b["volume"] > 0) & (est > 0)
+    mag = np.log10(b.loc[ok, "volume"] / est[ok]).round()
+    scale = mag.groupby(b.loc[ok, "code"]).agg(lambda s: s.mode().iloc[0])
+    b["volume"] = b["volume"] / (10.0 ** b["code"].map(scale).fillna(0))
+    return b
 
 
 def wide(b: pd.DataFrame, field: str) -> pd.DataFrame:

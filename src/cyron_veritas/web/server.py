@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pandas as pd  # noqa: F401
+import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -387,7 +387,8 @@ def fund_overview(code: str):
     metrics = snap["metrics"].iloc[0] if len(snap) else {}
     if isinstance(metrics, str):
         metrics = json.loads(metrics)
-    return _jsonable({"product": {k: cfg[k] for k in ("code", "name", "type", "manager", "custodian", "inception", "benchmark", "fees", "contract_limits")},
+    return _jsonable({"product": {**{k: cfg[k] for k in ("code", "name", "type", "manager", "custodian", "inception", "benchmark", "fees", "contract_limits")},
+                                  "bench_name": FP.bench_name(cfg)},
                       "nav": nav[["date", "unit_nav", "bench", "net_assets"]].assign(date=nav["date"].dt.strftime("%Y-%m-%d")).to_dict("records"),
                       "metrics": {k: v for k, v in m.items() if k != "monthly"},
                       "monthly": m["monthly"].reset_index().rename(columns={"index": "month", "date": "month"}).assign(
@@ -448,6 +449,72 @@ def fund_attribution(code: str):
     s = PF.style_exposure(code)
     return _jsonable({"brinson": b.to_dict("records"), "brinson_total": b.drop(columns=["month", "超配最多", "低配最多", "基准权重来源"]).sum().to_dict(),
                       "style": s.reset_index().rename(columns={"index": "factor"}).to_dict("records")})
+
+
+@app.get("/api/quant/research")
+def quant_research():
+    """因子检验结果：汇总表、累计 RankIC、最新合成权重、因子相关性。"""
+    from cyron_veritas.quant import factors as QF
+    from cyron_veritas.quant import research as QR
+
+    summ = QR.load("summary")
+    ric = QR.load("rank_ic").dropna(how="all")
+    wt = QR.load("weights")
+    corr = QR.load("corr")
+    cum = ric.fillna(0).cumsum()
+    return _jsonable({"summary": summ.reset_index(names="key").to_dict("records"),
+                      "cum_rank_ic": {"dates": [d.strftime("%Y-%m") for d in cum.index], **{c: cum[c].round(4).tolist() for c in cum.columns}},
+                      "weights": {"date": str(wt.index[-1].date()), **wt.iloc[-1].round(4).to_dict()},
+                      "corr": {"factors": [QF.NAME[c] for c in corr.columns], "values": corr.round(2).values.tolist()}})
+
+
+@app.get("/api/quant/{code}/rebalances")
+def quant_rebalances(code: str):
+    """每次调仓的优化与执行记录，以及最近一次目标组合的主动权重和主动暴露。"""
+    from cyron_veritas.config import ROOT as _ROOT
+    from cyron_veritas.fund import db as FDB
+    from cyron_veritas.fund import marketdata as FM
+
+    reb = FDB.df("select * from quant_rebalances where product = :p order by date", p=code)
+    for c in ("relaxed", "exposure"):
+        reb[c] = reb[c].map(lambda x: json.loads(x) if isinstance(x, str) else x)
+    t = pd.read_parquet(_ROOT / "data" / "quant" / f"targets_{code}.parquet")
+    from cyron_veritas.fund import product as FP
+    from cyron_veritas.fund import risk as FR
+
+    d = pd.Timestamp(t["date"].max())
+    held = t[t["date"] == d].set_index("code")["weight"]
+    wb, _ = FR.bench_weights(FP.bench_index(FP.load(code)), d)               # 全部成分股（含没持有的，才能看到低配）
+    allc = held.index.union(wb.index)
+    last = pd.DataFrame({"code": allc, "weight": held.reindex(allc).fillna(0).values, "bench": wb.reindex(allc).fillna(0).values})
+    names = FM.universe().set_index("code")["name"]
+    ind = FM.sw_industry()
+    last["active"] = last["weight"] - last["bench"] * held.sum()            # 基准按股票仓位缩放
+    last["name"] = last["code"].map(names)
+    last["industry"] = last["code"].map(ind)
+    top = pd.concat([last.nlargest(10, "active"), last.nsmallest(5, "active")])
+    exp = reb["exposure"].iloc[-1] if len(reb) else {}
+    from cyron_veritas.quant.riskmodel import STYLES
+    return _jsonable({"rebalances": reb.drop(columns=["exposure"]).to_dict("records"),
+                      "latest": {"date": str(d.date()), "n": int((last["weight"] > 0).sum()),
+                                 "top_active": top[["code", "name", "industry", "weight", "bench", "active"]].to_dict("records"),
+                                 "style_exposure": {k: exp.get(k, 0) for k in STYLES},
+                                 "industry_exposure": dict(sorted(((k, v) for k, v in exp.items() if k not in STYLES), key=lambda kv: kv[1]))}})
+
+
+@app.get("/api/quant/{code}/attribution")
+def quant_attribution(code: str):
+    """超额收益逐日分解（按月汇总）、全期年化、风险模型偏差检验。"""
+    from cyron_veritas.quant import attribution as QA
+
+    d = QA.decompose_cached(code)
+    mo = QA.monthly(d)
+    cum = d[["超额"] + QA.COLS].cumsum()
+    return _jsonable({"summary": QA.summary(d), "cols": QA.COLS,
+                      "monthly": mo[["产品", "指数", "超额"] + QA.COLS + ["复利差"]].reset_index(names="month").to_dict("records"),
+                      "cum": {"dates": [x.strftime("%Y-%m-%d") for x in cum.index], **{c: cum[c].round(5).tolist() for c in cum.columns}},
+                      "styles": {c.split("·")[1]: float(d[c].sum() * 252 / len(d)) for c in d.columns if c.startswith("风格·")},
+                      "bias": QA.bias_test(code).to_dict("records")})
 
 
 class PretradeReq(BaseModel):

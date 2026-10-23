@@ -24,7 +24,7 @@ def _market(codes_key: tuple) -> dict:
     codes = list(codes_key)
     b = M.bars(codes)
     close = M.wide(b, "close")
-    vol = M.wide(b, "volume") * 100
+    vol = M.wide(b, "volume")
     ca = M.corporate_actions(codes)
     adj = pd.DataFrame(0.0, index=close.index, columns=close.columns)
     bonus = pd.DataFrame(0.0, index=close.index, columns=close.columns)
@@ -34,7 +34,39 @@ def _market(codes_key: tuple) -> dict:
             bonus.at[r.ex_date, r.code] += r.bonus_per_share
     tr = (close * (1 + bonus) + adj) / close.shift() - 1
     return {"close": close, "ret": tr.where(tr.abs() < 0.25), "adv20": vol.rolling(20, min_periods=5).mean(),
-            "bench": M.index_close("sh000300").pct_change()}
+            "bench": M.index_close("sh000300").pct_change()}     # 沪深300：风格因子 Beta 的市场代理；产品自己的基准用 bench_returns
+
+
+def bench_returns(symbol: str) -> pd.Series:
+    return M.index_close(symbol).pct_change()
+
+
+def bench_weights(index: str, d, hist: pd.DataFrame | None | str = "auto") -> tuple[pd.Series, str]:
+    """d 时点的基准成分权重（只含有行情的股票，合计 1）。有 Tushare 历史权重就取 d 之前最近一期；
+    否则用最新权重按各股总收益倒推回 d（漂移调整），仍有幸存者偏差（期间被调出的股票不在里面）。"""
+    d = pd.Timestamp(d)
+    mv = market_view()
+    hist = M.index_weights_hist(index) if isinstance(hist, str) else hist
+    if hist is not None:
+        snap = hist[hist["date"] <= d]
+        if len(snap):
+            w = snap[snap["date"] == snap["date"].max()].set_index("code")["weight"]
+            w = w[w.index.isin(mv["ret"].columns)]
+            return w / w.sum(), "成分股历史权重"
+    tri = _tri()
+    latest = M.index_weights(index)
+    codes = latest.index.intersection(tri.columns)
+    w = (latest[codes] * tri.loc[:d].iloc[-1][codes] / tri.iloc[-1][codes]).dropna()
+    return w / w.sum(), "最新成分权重倒推"
+
+
+@lru_cache(maxsize=1)
+def _tri_cached(key: tuple) -> pd.DataFrame:
+    return (1 + market_view()["ret"].fillna(0)).cumprod()
+
+
+def _tri() -> pd.DataFrame:
+    return _tri_cached(tuple(sorted(M.universe()["code"])))
 
 
 def market_view() -> dict:
@@ -72,7 +104,7 @@ def snapshot(code: str, d) -> dict:
     # 市场风险：当前持仓回放近 250 个交易日
     r = mv["ret"].loc[:d].iloc[-250:]
     port = (r[w.index.intersection(r.columns)].fillna(0) * w.reindex(r.columns.intersection(w.index))).sum(axis=1)
-    bench = mv["bench"].reindex(port.index)
+    bench = bench_returns(P.bench_symbol(cfg)).reindex(port.index)
     navs = nav["unit_nav"].loc[:d]
     peak = navs.cummax()
     snap = {
@@ -85,37 +117,64 @@ def snapshot(code: str, d) -> dict:
         "var95_1d": RM.historical_var(port, 0.95), "cvar95_1d": RM.historical_cvar(port, 0.95), "var99_1d": RM.historical_var(port, 0.99),
         "vol_ann": RM.annualized_vol(port), "beta": RM.beta(port, bench),
         "max_drawdown": float(1 - (navs / peak).min()), "current_drawdown": float(1 - navs.iloc[-1] / peak.iloc[-1]),
-        "to_warning_line": float(row["unit_nav"] / lim["warning_line"] - 1), "to_stop_line": float(row["unit_nav"] / lim["stop_line"] - 1),
         "weights": w.round(5).to_dict(),
     }
+    if "warning_line" in lim:
+        snap["to_warning_line"] = float(row["unit_nav"] / lim["warning_line"] - 1)
+        snap["to_stop_line"] = float(row["unit_nav"] / lim["stop_line"] - 1)
+    if "active_single_max" in lim:                                        # 指数增强：相对基准的偏离
+        wb, _ = bench_weights(P.bench_index(cfg), d)
+        stock_w = h["mv"].sum() / net
+        wb_s = wb * stock_w                                                # 基准按股票仓位缩放
+        act = w.reindex(w.index.union(wb_s.index)).fillna(0) - wb_s.reindex(w.index.union(wb_s.index)).fillna(0)
+        ai = act.groupby(act.index.map(lambda c: ind.get(c, "未分类"))).sum()
+        bret = bench_returns(P.bench_symbol(cfg)).reindex(navs.index)
+        ex = (navs.pct_change() - bret).dropna().iloc[-60:]
+        snap.update({"active_single": float(act.abs().max()), "active_single_name": str(act.abs().idxmax()),
+                     "active_industry": float(ai.abs().max()), "active_industry_name": str(ai.abs().idxmax()),
+                     "bench_member_weight": float(w[w.index.isin(wb.index)].sum() / max(stock_w, 1e-9)),
+                     "te_60d": float(ex.std() * np.sqrt(252)) if len(ex) >= 20 else float("nan"),
+                     "active_industry_detail": ai.round(4).sort_values().to_dict()})
     return snap
 
 
 def check_limits(code: str, snap: dict) -> list[dict]:
+    """按产品合同里出现的条款逐条检查（股票多头和指数增强的条款不同，没写的条款不查）。"""
     cfg = P.load(code)
     lim = cfg["contract_limits"]
     warn_ratio = 0.9
     out = []
 
     def add(rule, label, value, limit, direction="max", detail=""):
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return
         if direction == "max":
             st = BREACH if value > limit else (WARN if value > limit * warn_ratio else OK)
         else:
             st = BREACH if value < limit else (WARN if value < limit / warn_ratio else OK)
         out.append({"rule": rule, "label": label, "value": value, "limit": limit, "direction": direction, "status": st, "detail": detail})
 
-    over = [f"{k}" for k, v in snap["weights"].items() if v > lim["single_name_max"]]
-    add("single_name_max", "单只股票占净值", snap["top1"], lim["single_name_max"], detail=("超限：" + "、".join(over)) if over else snap["top1_name"])
-    top_ind, top_v = next(iter(snap["by_industry"].items())) if snap["by_industry"] else ("", 0.0)
-    add("industry_max", "单一申万一级行业占净值", top_v, lim["industry_max"], detail=top_ind)
+    if "single_name_max" in lim:
+        over = [f"{k}" for k, v in snap["weights"].items() if v > lim["single_name_max"]]
+        add("single_name_max", "单只股票占净值", snap["top1"], lim["single_name_max"], detail=("超限：" + "、".join(over)) if over else snap["top1_name"])
+    if "industry_max" in lim:
+        top_ind, top_v = next(iter(snap["by_industry"].items())) if snap["by_industry"] else ("", 0.0)
+        add("industry_max", "单一申万一级行业占净值", top_v, lim["industry_max"], detail=top_ind)
+    if "active_single_max" in lim:
+        add("active_single_max", "单票相对基准偏离", snap["active_single"], lim["active_single_max"], detail=snap["active_single_name"])
+        add("active_industry_max", "行业相对基准偏离", snap["active_industry"], lim["active_industry_max"], detail=snap["active_industry_name"])
+        add("bench_constituent_min", "基准成分股占股票资产", snap["bench_member_weight"], lim["bench_constituent_min"], "min")
+        add("te_max", "跟踪误差（60 日滚动，年化）", snap["te_60d"], lim["te_max"])
     add("cash_min", "现金类资产占净值", snap["cash_weight"], lim["cash_min"], "min")
     add("liquidity_5d_min", "5 日内可变现比例", snap["liquidity"][5], lim["liquidity_5d_min"], "min")
-    add("warning_line", "单位净值 vs 预警线", snap["unit_nav"], lim["warning_line"], "min", "触及后不得新增仓位")
-    add("stop_line", "单位净值 vs 止损线", snap["unit_nav"], lim["stop_line"], "min", "触及后须清仓")
+    if "warning_line" in lim:
+        add("warning_line", "单位净值 vs 预警线", snap["unit_nav"], lim["warning_line"], "min", "触及后不得新增仓位")
+        add("stop_line", "单位净值 vs 止损线", snap["unit_nav"], lim["stop_line"], "min", "触及后须清仓")
     banned = {b["code"] for b in cfg.get("banned", [])}
-    held_banned = [c for c in snap["weights"] if c in banned]
-    out.append({"rule": "banned", "label": "持有禁投池证券", "value": float(len(held_banned)), "limit": 0.0, "direction": "max",
-                "status": BREACH if held_banned else OK, "detail": "、".join(held_banned)})
+    if banned:
+        held_banned = [c for c in snap["weights"] if c in banned]
+        out.append({"rule": "banned", "label": "持有禁投池证券", "value": float(len(held_banned)), "limit": 0.0, "direction": "max",
+                    "status": BREACH if held_banned else OK, "detail": "、".join(held_banned)})
     return out
 
 

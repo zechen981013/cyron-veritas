@@ -8,7 +8,6 @@ from __future__ import annotations
 import base64
 import io
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
-from markupsafe import Markup, escape  # noqa: E402
+from markupsafe import escape  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from cyron_veritas.config import OUTPUT_DIR, chat_model  # noqa: E402
@@ -25,7 +24,7 @@ from cyron_veritas.fund import marketdata as M  # noqa: E402
 from cyron_veritas.fund import perf as PF  # noqa: E402
 from cyron_veritas.fund import product as P  # noqa: E402
 from cyron_veritas.fund import risk as R  # noqa: E402
-from cyron_veritas.risk.report_graph import PH_RE, check_placeholders, fill  # noqa: E402
+from cyron_veritas.risk.report_graph import check_placeholders, fill  # noqa: E402
 
 plt.rcParams["font.sans-serif"] = ["PingFang SC", "Heiti SC", "Arial Unicode MS", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
@@ -79,6 +78,7 @@ def build(code: str, month: str, with_llm: bool = True) -> dict:
     met = PF.nav_metrics(code)
     # 截到报告月
     sub = nav["unit_nav"]
+    bname = P.bench_name(cfg)
     b = M.index_close(cfg["benchmark"]).reindex(sub.index).ffill()
     m_start = pd.Period(month, "M").start_time
     prev = sub.loc[:m_start - pd.Timedelta(days=1)]
@@ -94,7 +94,7 @@ def build(code: str, month: str, with_llm: bool = True) -> dict:
     h = R.holdings_on(code, d).sort_values("mv", ascending=False).head(10)
 
     facts = {
-        "nav": ("月末单位净值", f"{sub.iloc[-1]:.4f}"), "m_ret": ("本月收益", _pct(m_ret)), "mb_ret": ("本月沪深300", _pct(mb_ret)),
+        "nav": ("月末单位净值", f"{sub.iloc[-1]:.4f}"), "m_ret": ("本月收益", _pct(m_ret)), "mb_ret": (f"本月{bname}", _pct(mb_ret)),
         "m_ex": ("本月超额", _pct(m_ret - mb_ret)), "ytd": ("今年以来收益", _pct(ytd)),
         "since": ("成立以来收益", _pct(sub.iloc[-1] - 1)), "mdd": ("成立以来最大回撤", _pct(1 - (sub / sub.cummax()).min())),
         "stock_w": ("股票仓位", _pct(snap["stock_weight"], 1)), "n": ("持股数量", str(snap["n_holdings"])),
@@ -130,7 +130,7 @@ def build(code: str, month: str, with_llm: bool = True) -> dict:
     # 图
     fig, ax = plt.subplots(figsize=(7.2, 3))
     ax.plot(sub.index, sub.values, color="#0E7C66", lw=1.5, label=cfg["name"][:12])
-    ax.plot(b.index, (b / b.iloc[0]).values, color="#999", lw=1.1, label="沪深300（归一）")
+    ax.plot(b.index, (b / b.iloc[0]).values, color="#999", lw=1.1, label=f"{bname}（归一）")
     ax.legend(fontsize=7, frameon=False)
     ax.set_title("单位净值与基准", fontsize=9, loc="left")
     for s in ("top", "right"):
@@ -164,12 +164,12 @@ h1{{font-size:19px;margin:0}}h2{{font-size:14px;border-bottom:2px solid #1b2430;
 td:first-child,th:first-child{{text-align:left}}th{{background:#f7f7f7}}.g{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}img{{max-width:100%}}
 .fact{{border-bottom:1px dotted #0E7C66}}.brand{{color:#0E7C66;letter-spacing:.1em;font-weight:600;font-size:11px}}</style></head><body>
 <div class="brand">CYRON VERITAS · 投资者月报</div><h1>{escape(cfg['name'])}</h1>
-<div class="sub">报告期：{month} · 截至 {d:%Y-%m-%d} · 管理人：{escape(cfg['manager'])} · 托管人：{escape(cfg['custodian'])} · 业绩比较基准：沪深300</div>
+<div class="sub">报告期：{month} · 截至 {d:%Y-%m-%d} · 管理人：{escape(cfg['manager'])} · 托管人：{escape(cfg['custodian'])} · 业绩比较基准：{bname}</div>
 <div class="k"><div>月末单位净值<b>{sub.iloc[-1]:.4f}</b></div><div>本月收益<b>{_pct(m_ret)}</b><span class="sub">基准 {_pct(mb_ret)}</span></div>
 <div>今年以来<b>{_pct(ytd)}</b></div><div>成立以来<b>{_pct(sub.iloc[-1] - 1)}</b></div><div>最大回撤<b>{_pct(1 - (sub / sub.cummax()).min())}</b></div></div>
 <h2>经理观点</h2>{comm_block}
 <h2>净值表现</h2><img src="data:image/png;base64,{nav_png}"><img src="data:image/png;base64,{dd_png}">
-<div class="g"><div><h3>近 12 个月收益</h3><table><tr><th>月份</th><th>产品</th><th>沪深300</th><th>超额</th></tr>{rows_m}</table></div>
+<div class="g"><div><h3>近 12 个月收益</h3><table><tr><th>月份</th><th>产品</th><th>{bname}</th><th>超额</th></tr>{rows_m}</table></div>
 <div><h3>行业分布（占净值）</h3><table><tr><th>申万一级</th><th>占比</th></tr>{rows_i}</table>
 <h3>前十大持仓</h3><table><tr><th>名称</th><th>代码</th><th>占净值</th></tr>{rows_h}</table></div></div>
 <h2>本月业绩归因（Brinson，申万一级行业）</h2>{att_html}

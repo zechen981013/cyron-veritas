@@ -4,7 +4,7 @@ Brinson（BHB，单期算术，按月）：
   配置效应 = Σ (组合行业权重 − 基准行业权重) × (基准行业收益 − 基准总收益)
   选股效应 = Σ 基准行业权重 × (组合行业收益 − 基准行业收益)
   交互效应 = Σ (组合行业权重 − 基准行业权重) × (组合行业收益 − 基准行业收益)
-  基准总收益 = 沪深300 指数实际涨跌；基准行业权重 / 行业收益 = 月初沪深300 成分股按申万一级归类、成分股当月总收益按权重平均。
+  基准总收益 = 产品基准指数（沪深300 / 中证500）实际涨跌；基准行业权重 / 行业收益 = 月初基准成分股按申万一级归类、成分股当月总收益按权重平均。
   月初成分权重优先用 Tushare 历史权重（精确）；没有 token 时用最新权重按个股总收益倒推（漂移调整，仍有幸存者偏差）。
   成分股拼出的模型基准与真实指数之差（分红再投资 + 幸存者偏差）单列「基准近似误差」。
   （试过用申万一级行业指数做基准行业收益：申万指数覆盖全 A 股、含大量小盘股，和沪深300 成分股表现差得远，
@@ -13,21 +13,22 @@ Brinson（BHB，单期算术，按月）：
 
 风格暴露（月末，截面 z 分数，股票池 = 中证 800，1%/99% 缩尾）：
   规模 = ln(流通市值)；价值 = 每股净资产 / 股价；动量 = 过去 12 个月剔除最近 1 个月收益；波动 = 60 日收益标准差；
-  流动性 = 20 日平均换手率；Beta = 250 日对沪深300 回归。组合暴露 = 持仓权重加权，基准暴露 = 沪深300 权重加权。
+  流动性 = 20 日平均换手率；Beta = 250 日对沪深300 回归。组合暴露 = 持仓权重加权，基准暴露 = 产品基准成分权重加权。
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from cyron_veritas.fund import db
 from cyron_veritas.fund import marketdata as M
+from cyron_veritas.fund import product as P
 from cyron_veritas.fund import risk as R
 
 RF = 0.015  # 无风险利率（夏普比率用）
 
 
-def nav_metrics(code: str, benchmark: str = "sh000300") -> dict:
+def nav_metrics(code: str, benchmark: str | None = None) -> dict:
+    benchmark = benchmark or P.bench_symbol(P.load(code))
     nav = R.nav_series(code)["unit_nav"]
     b = M.index_close(benchmark).reindex(nav.index).ffill()
     r, rb = nav.pct_change().dropna(), b.pct_change().dropna()
@@ -51,31 +52,18 @@ def nav_metrics(code: str, benchmark: str = "sh000300") -> dict:
             "monthly": table}
 
 
-def _bench_weights(d0: pd.Timestamp, hist: pd.DataFrame | None, latest: pd.Series, tri: pd.DataFrame) -> tuple[pd.Series, str]:
-    """d0 时点的基准成分权重。有历史权重（Tushare）就取 d0 之前最近一期；否则用最新权重按各股总收益倒推回 d0（漂移调整），
-    仍有幸存者偏差（期间被调出的股票不在里面），偏差进「基准近似误差」。"""
-    if hist is not None:
-        snap = hist[hist["date"] <= d0]
-        if len(snap):
-            w = snap[snap["date"] == snap["date"].max()].set_index("code")["weight"]
-            return w / w.sum(), "成分股历史权重"
-    codes = latest.index.intersection(tri.columns)
-    w = latest[codes] * tri.loc[:d0].iloc[-1][codes] / tri.iloc[-1][codes]
-    return w.dropna() / w.sum(), "最新成分权重倒推"
-
-
 def brinson(code: str, hist_weights: pd.DataFrame | None = "auto") -> pd.DataFrame:
-    """月度 Brinson（BHB）。基准总收益 = 沪深300 指数实际涨跌。
-    基准行业权重与行业收益来自沪深300 成分股：月初成分权重按申万一级归类，行业收益 = 成分股当月总收益按权重平均。
-    月初成分权重：有 Tushare 历史权重时精确取当期；没有时用最新权重倒推（见 _bench_weights）。
+    """月度 Brinson（BHB）。基准总收益 = 产品基准指数实际涨跌。
+    基准行业权重与行业收益来自基准成分股：月初成分权重按申万一级归类，行业收益 = 成分股当月总收益按权重平均。
+    月初成分权重：有 Tushare 历史权重时精确取当期；没有时用最新权重倒推（见 risk.bench_weights）。
     由成分股拼出的「模型基准」与真实指数之差（分红再投资 + 幸存者偏差）单列「基准近似误差」，不混进配置 / 选股效应。"""
+    cfg = P.load(code)
     mv = R.market_view()
     ret = mv["ret"]
-    tri = (1 + ret.fillna(0)).cumprod()
     ind = M.sw_industry()
-    latest = M.index_weights("000300")
-    hist = M.index_weights_hist("000300") if isinstance(hist_weights, str) else hist_weights
-    idx = M.index_close("sh000300")
+    bidx = P.bench_index(cfg)
+    hist = M.index_weights_hist(bidx) if isinstance(hist_weights, str) else hist_weights
+    idx = M.index_close(P.bench_symbol(cfg))
     nav = R.nav_series(code)
     month_ends = nav.index.to_series().groupby(nav.index.to_period("M")).last()
     rows = []
@@ -91,7 +79,7 @@ def brinson(code: str, hist_weights: pd.DataFrame | None = "auto") -> pd.DataFra
         g = pw.groupby(pw.index.map(lambda c: ind.get(c, "未分类")))
         wp = g.sum()
         rp = g.apply(lambda s: float((s * cum.reindex(s.index).fillna(0)).sum() / s.sum()))
-        bw, method = _bench_weights(d0, hist, latest, tri)
+        bw, method = R.bench_weights(bidx, d0, hist)
         bw = bw[bw.index.isin(cum.index)]
         bw = bw / bw.sum()
         bg = bw.groupby(bw.index.map(lambda c: ind.get(c, "未分类")))
@@ -125,7 +113,7 @@ def style_factors(d: pd.Timestamp) -> pd.DataFrame:
     codes = sorted(M.universe()["code"])
     b = M.bars(codes)
     b = b[b["date"] <= d]
-    close, vol, to = M.wide(b, "close"), M.wide(b, "volume") * 100, M.wide(b, "turnover")
+    close, vol, to = M.wide(b, "close"), M.wide(b, "volume"), M.wide(b, "turnover")
     mv = R.market_view()
     ret = mv["ret"].loc[:d]
     px = close.iloc[-1]
@@ -152,8 +140,9 @@ def style_exposure(code: str, d=None) -> pd.DataFrame:
     h = R.holdings_on(code, d)
     w = h.set_index("code")["mv"]
     w = w / w.sum()
-    bw = M.index_weights("000300")
+    cfg = P.load(code)
+    bw, _ = R.bench_weights(P.bench_index(cfg), d)
     bw = bw[bw.index.isin(z.index)] / bw[bw.index.isin(z.index)].sum()
     port = z.reindex(w.index).mul(w, axis=0).sum()
     bench = z.reindex(bw.index).mul(bw, axis=0).sum()
-    return pd.DataFrame({"组合": port, "基准（沪深300）": bench, "主动暴露": port - bench}).round(3)
+    return pd.DataFrame({"组合": port, "基准": bench, "主动暴露": port - bench}).round(3)

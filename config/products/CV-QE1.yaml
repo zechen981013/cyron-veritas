@@ -1,0 +1,44 @@
+# Cyron 量化增强 1 号私募证券投资基金（模拟产品，用于演示中台；所有数据由真实行情按规则模拟生成）
+code: CV-QE1
+name: Cyron 量化增强1号私募证券投资基金
+type: quant_enhanced         # equity_long / quant_enhanced / private_equity
+manager: Cyron 资产管理（模拟）
+custodian: 模拟托管人
+inception: 2024-02-01
+initial_capital: 200000000   # 首发规模 2 亿元
+benchmark: sh000905          # 业绩比较基准：中证500
+benchmark_index: "000905"
+fees:
+  management: 0.01           # 指增产品管理费 1%
+  custody: 0.0005
+  performance: 0.20          # 超额收益部分（模拟中单列计提、不支付）
+contract_limits:
+  active_single_max: 0.02    # 单票相对基准偏离 ≤ 2%
+  active_industry_max: 0.03  # 申万一级行业相对基准偏离 ≤ 3%
+  bench_constituent_min: 0.80  # 投资于中证500 成分股的比例 ≥ 股票资产 80%
+  te_max: 0.06               # 跟踪误差目标（年化）≤ 6%：事前约束，事后按 60 日滚动监控
+  cash_min: 0.01
+  liquidity_5d_min: 0.90
+  participation_rate: 0.10
+banned: []
+strategy:
+  alpha: icir                # icir：ICIR 加权合成（事先确定）；equal：等权合成（对照）
+  cash_target: 0.02
+  risk_aversion: 10          # 主动风险厌恶系数 λ
+  turnover_max: 0.30         # 单月单边换手上限
+  style_exposure_max: 0.30   # 风格主动暴露（z 分数）上限
+  size_exposure_max: 0.10    # 规模暴露单独从严，避免靠小盘风格赚超额
+  tcost: 0.003               # 优化器里的单边交易成本假设
+  participation: 0.10        # 执行：每只股票每天成交不超过当日成交量 10%，没做完的单子次日继续
+  impact_k: 0.3              # 冲击成本 = 半价差 5bp + k × 日波动 × √(成交量占比)
+flows:
+  - {date: 2024-06-03, type: subscribe, amount: 50000000}
+  - {date: 2025-03-03, type: subscribe, amount: 80000000}
+  - {date: 2025-10-09, type: redeem, amount: 40000000}
+  - {date: 2026-04-01, type: subscribe, amount: 30000000}
+trading:
+  commission: 0.00015        # 量化通道佣金万 1.5
+  min_commission: 5
+  stamp_duty_sell: 0.0005
+  transfer_fee: 0.00001
+  slippage: 0.0005
