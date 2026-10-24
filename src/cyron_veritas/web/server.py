@@ -356,7 +356,16 @@ async def call_audio(file: UploadFile = File(...), company: str = Form("")):
 
 # ---------- 资管中台 ----------
 def _jsonable(x):
-    return json.loads(json.dumps(x, ensure_ascii=False, default=str))
+    """转成可 JSON 序列化的结构；NaN / ±inf（如没有正现金流的项目 IRR）变成 null。"""
+    def clean(o):
+        if isinstance(o, float):
+            return o if o == o and o not in (float("inf"), float("-inf")) else None
+        if isinstance(o, dict):
+            return {k: clean(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [clean(v) for v in o]
+        return o
+    return clean(json.loads(json.dumps(x, ensure_ascii=False, default=str)))
 
 
 @app.get("/api/fund/products")
@@ -576,6 +585,142 @@ def fund_sheets(code: str, limit: int = 30):
     files = sorted(FP.sheet_dir(code).glob("*.xlsx"), reverse=True)[:limit]
     return [{"name": f.name, "url": f"/sheets/{code}/{f.name}"} for f in files]
 
+
+# ---------------- PE / VC ----------------
+def _pe_m(x):
+    return x if isinstance(x, dict) else json.loads(x)
+
+
+@app.get("/api/pe/{code}/overview")
+def pe_overview(code: str):
+    """基金条款、最新指标、季度序列、项目汇总、后见之明压力测试。"""
+    from cyron_veritas.fund import db as FDB
+    from cyron_veritas.fund import product as FP
+    from cyron_veritas.pe import metrics as PX
+    from cyron_veritas.pe import stress as PS
+
+    cfg = FP.load(code)
+    qs = FDB.df("select date, metrics from pe_quarters where product = :p order by date", p=code)
+    ms = [_pe_m(m) for m in qs["metrics"]]
+    inception = pd.Timestamp(cfg["inception"])
+    series = [{"date": str(d), **{k: m.get(k) for k in ("TVPI", "DPI", "RVPI", "lp_paid_in", "lp_distributed", "lp_nav", "cum_net_cf", "accrued_carry", "carry_paid")},
+               "net_irr": m.get("net_irr") if (pd.Timestamp(d) - inception).days >= 730 else None} for d, m in zip(qs["date"], ms)]
+    tx = FDB.df("select * from pe_tx where product = :p", p=code)
+    tx["date"] = pd.to_datetime(tx["date"])
+    pipe = FDB.df("select deal, company, sector, status, synthetic from pe_pipeline where product = :p and status != '未投资'", p=code).set_index("deal")
+    last_marks = FDB.df("select deal, fv, method from pe_marks where product = :p and date = (select max(date) from pe_marks where product = :p)", p=code).set_index("deal")
+    deals = []
+    for deal, g in tx[tx["deal"] != "FUND"].groupby("deal"):
+        inv = -g.loc[g["type"] == "投资", "amount"].sum()
+        real = g.loc[g["amount"] > 0, "amount"].sum()
+        fv = float(last_marks["fv"].get(deal, 0) or 0)
+        flows = [(r.date, r.amount) for r in g.itertuples() if r.amount] + ([(tx["date"].max(), fv)] if fv else [])
+        ev = {t: g.loc[g["type"] == t, "date"].min() for t in ("投资", "上市")}
+        exits = g.loc[g["type"].isin(["减持", "回购退出", "核销"]), "date"]
+        deals.append({"deal": deal, "company": pipe["company"].get(deal, deal), "sector": pipe["sector"].get(deal, ""), "status": pipe["status"].get(deal, ""),
+                      "synthetic": bool(pipe["synthetic"].get(deal, 0)), "invested": inv, "realized": real, "fv": fv, "moic": (real + fv) / inv if inv else None,
+                      "irr": PX.xirr(flows), "close": str(ev["投资"].date()) if pd.notna(ev["投资"]) else None,
+                      "listing": str(ev["上市"].date()) if pd.notna(ev["上市"]) else None, "exit_end": str(exits.max().date()) if len(exits) else None})
+    fees = tx[tx["deal"] == "FUND"].groupby("type")["amount"].sum().to_dict()
+    return _jsonable({"product": {k: cfg[k] for k in ("code", "name", "type", "manager", "custodian", "inception", "commitment", "terms", "lps", "exit_policy")},
+                      "latest": {**ms[-1], "date": str(qs["date"].iloc[-1])}, "series": series, "deals": sorted(deals, key=lambda x: x["close"] or ""),
+                      "fees": fees, "stress": PS.run(code)})
+
+
+@app.get("/api/pe/{code}/pipeline")
+def pe_pipeline(code: str):
+    from cyron_veritas.fund import db as FDB
+
+    p = FDB.df("select deal, company, sector, stage, status, events, reason, synthetic from pe_pipeline where product = :p", p=code)
+    p["events"] = p["events"].map(_pe_m)
+    return _jsonable(p.to_dict("records"))
+
+
+@app.get("/api/pe/{code}/deal/{deal}")
+def pe_deal(code: str, deal: str):
+    """单个项目：交易条款（招股书出处）、季度估值、交易流水。"""
+    from cyron_veritas.fund import db as FDB
+    from cyron_veritas.fund import product as FP
+
+    marks = FDB.df("select date, status, method, qty, price, discount, fv, cost, note from pe_marks where product = :p and deal = :d order by date", p=code, d=deal)
+    tx = FDB.df("select date, type, qty, price, amount, note from pe_tx where product = :p and deal = :d order by date, id", p=code, d=deal)
+    sells = tx[tx["type"] == "减持"]
+    tx_small = pd.concat([tx[tx["type"] != "减持"], sells.groupby(pd.to_datetime(sells["date"]).dt.to_period("M")).agg(
+        date=("date", "max"), qty=("qty", "sum"), amount=("amount", "sum"), price=("price", "mean")).assign(type="减持（按月汇总）", note="")]).sort_values("date")
+    terms = None
+    if not deal.startswith("SYN"):
+        from cyron_veritas.pe import deals as PD
+
+        spec = next(x for x in FP.load(code)["deals"] if x["code"] == deal)
+        terms = PD.terms(spec)
+    return _jsonable({"marks": marks.to_dict("records"), "tx": tx_small.to_dict("records"), "terms": terms})
+
+
+@app.get("/api/pe/{code}/capital")
+def pe_capital(code: str):
+    """缴款与分配（按日期汇总）、各 LP 资本账户、瀑布各档累计。"""
+    from cyron_veritas.fund import db as FDB
+    from cyron_veritas.fund import product as FP
+
+    cfg = FP.load(code)
+    cap = FDB.df("select date, notice_date, lp, type, amount, detail from pe_capital where product = :p order by date", p=code)
+    cap["detail"] = cap["detail"].map(_pe_m)
+    events = []
+    for (d, t), g in cap.groupby(["date", "type"], sort=True):
+        purpose = next((x.get("用途") for x in g["detail"] if x and x.get("用途")), "")
+        tiers: dict = {}
+        for x in g["detail"]:
+            for k, v in (x or {}).items():
+                if isinstance(v, (int, float)):
+                    tiers[k] = tiers.get(k, 0) + v
+        events.append({"date": str(d), "notice_date": str(g["notice_date"].iloc[0]), "type": t, "amount": float(g["amount"].sum()), "purpose": purpose, "tiers": tiers})
+    m = _pe_m(FDB.df("select metrics from pe_quarters where product = :p order by date desc limit 1", p=code)["metrics"].iloc[0])
+    lp_commit = sum(x["commitment"] for x in cfg["lps"] if x["type"] != "GP")
+    accounts = []
+    for x in cfg["lps"]:
+        g = cap[cap["lp"] == x["id"]]
+        called, dist = g.loc[g["type"] == "缴款", "amount"].sum(), g.loc[g["type"] == "分配", "amount"].sum()
+        nav = m["lp_nav"] * x["commitment"] / lp_commit if x["type"] != "GP" else None
+        accounts.append({**x, "called": called, "distributed": dist, "carry": g.loc[g["type"] == "业绩报酬", "amount"].sum(), "nav": nav,
+                         "tvpi": (dist + (nav or 0)) / called if called else None})
+    return _jsonable({"events": events, "accounts": accounts, "waterfall": m.get("waterfall_paid", {}), "accrued_carry": m["accrued_carry"]})
+
+
+@app.get("/api/pe/dd/{deal}")
+def pe_dd(deal: str):
+    from cyron_veritas.pe import dd as PDD
+
+    try:
+        return _jsonable(PDD.load(deal))
+    except FileNotFoundError:
+        raise HTTPException(404, "还没有做尽调")
+
+
+@app.get("/prospectus/{deal}.pdf")
+def pe_prospectus_pdf(deal: str):
+    from cyron_veritas.pe import prospectus as PPR
+
+    f = PPR.DIR / f"{deal}.pdf"
+    if not f.exists() or not deal.isdigit():
+        raise HTTPException(404)
+    return FileResponse(f, media_type="application/pdf")
+
+
+class PEReportReq(BaseModel):
+    quarter: str
+    lp: str = "LP02"
+
+
+@app.post("/api/pe/{code}/report")
+def pe_report(code: str, req: PEReportReq):
+    def work(job: Job):
+        from cyron_veritas.pe import report as PRP
+
+        job.emit({"type": "status", "text": "汇总资本账户、组合估值，生成 GP 观点"})
+        r = PRP.build(code, req.quarter, req.lp)
+        return {"html": _url(r["html"]), "pdf": _url(r["pdf"]) if r["pdf"] else None, "check": r["check"]}
+
+    return {"job_id": start_job("pe_report", {"code": code, **req.model_dump()}, work).id}
 
 @app.get("/sheets/{code}/{name}")
 def fund_sheet_file(code: str, name: str):

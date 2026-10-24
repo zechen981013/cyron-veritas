@@ -31,6 +31,12 @@ def main(argv: list[str] | None = None) -> None:
     qt.add_argument("action", choices=["research", "riskmodel", "attribution"])
     qt.add_argument("product", nargs="?", default="CV-QE1")
     qt.add_argument("--refresh", action="store_true", help="重算因子面板 / 因子收益（不用缓存）")
+    pe = sub.add_parser("pe", help="PE / VC：招股书尽调、基金运行、LP 季报、后见之明压力测试")
+    pe.add_argument("action", choices=["dd", "run", "report", "stress"])
+    pe.add_argument("target", nargs="?", default="CV-PE1", help="dd：股票代码（多个用逗号）；其余：基金代码")
+    pe.add_argument("--quarter", default="2023Q3")
+    pe.add_argument("--lp", default="LP02")
+    pe.add_argument("--refresh", action="store_true")
     w = sub.add_parser("serve", help="启动 Web 界面")
     w.add_argument("--port", type=int, default=8100)
     w.add_argument("--host", default="127.0.0.1")
@@ -87,6 +93,23 @@ def main(argv: list[str] | None = None) -> None:
             d = attribution.decompose(a.product)
             print(json.dumps(attribution.summary(d), ensure_ascii=False, indent=2))
             print(attribution.bias_test(a.product).round(3).to_string())
+        return
+    if a.cmd == "pe":
+        if a.action == "dd":
+            from cyron_veritas.pe import dd
+            for c in a.target.split(","):
+                r = dd.run(c.strip(), refresh=a.refresh)
+                print(f"{r['company']}：{len(r['items']['rounds']['rounds'])} 个股本事件，待复核 {len(r['unverified'])} 个字段")
+        elif a.action == "run":
+            from cyron_veritas.pe import fund
+            print(fund.run(a.target))
+        elif a.action == "report":
+            from cyron_veritas.pe import report
+            print(report.build(a.target, a.quarter, a.lp))
+        elif a.action == "stress":
+            from cyron_veritas.pe import stress
+            for r in stress.run(a.target):
+                print(r)
         return
     if a.cmd == "mcp":
         from cyron_veritas.mcp_server import main as mcp_main

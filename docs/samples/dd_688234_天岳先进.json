@@ -1,0 +1,359 @@
+{
+ "code": "688234",
+ "company": "天岳先进",
+ "listing_date": "2022-01-12",
+ "prospectus": {
+  "code": "688234",
+  "company": "天岳先进",
+  "title": "天岳先进首次公开发行股票并在科创板上市招股说明书",
+  "date": "2022-01-07",
+  "listing_date": "2022-01-12",
+  "pdf_url": "http://static.cninfo.com.cn/finalpage/2022-01-07/1212110958.PDF",
+  "page_url": "http://www.cninfo.com.cn/new/disclosure/detail?stockCode=688234&announcementId=1212110958&orgId=9900047650&announcementTime=2022-01-07"
+ },
+ "items": {
+  "rounds": {
+   "rounds": [
+    {
+     "date": "2010-11",
+     "kind": "其他",
+     "price": null,
+     "unit": null,
+     "capital_before": null,
+     "capital_after": 2000.0,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "济南天业、窦文涛（代宗艳民持有）",
+     "note": "天岳有限设立，注册资本2,000万元；济南天业货币1,600万元持80%，宗艳民货币400万元委托窦文涛代持20%",
+     "page": 46
+    },
+    {
+     "date": "2010-11",
+     "kind": "股权转让",
+     "price": 1.0,
+     "unit": "元/出资额",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "宗艳民、郝霄鹏",
+     "note": "第一次股权转让：济南天业向宗艳民转让50%（1,000万元）、向郝霄鹏转让30%（600万元）；宗艳民受让部分委托徐健代持",
+     "page": 50
+    },
+    {
+     "date": "2011-01",
+     "kind": "增资",
+     "price": 1.0,
+     "unit": "元/出资额",
+     "capital_before": 2000.0,
+     "capital_after": 6000.0,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "宗艳民、郝霄鹏",
+     "note": "第一次增资：宗艳民货币增资2,800万元、郝霄鹏货币增资1,200万元；代持股权增资",
+     "page": 50
+    },
+    {
+     "date": "2012-03",
+     "kind": "增资",
+     "price": 1.0,
+     "unit": "元/出资额",
+     "capital_before": 6000.0,
+     "capital_after": 6543.0,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "宗艳民、郝霄鹏",
+     "note": "第二次增资：宗艳民货币增资380.10万元、郝霄鹏货币增资162.90万元；代持股权增资",
+     "page": 50
+    },
+    {
+     "date": "2013-03",
+     "kind": "股权转让",
+     "price": null,
+     "unit": null,
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "宗艳民、胡小波、徐现刚",
+     "note": "第二次股权转让：窦文涛向宗艳民转让20%（1,308.60万元）、徐健向宗艳民转让50%（3,271.50万元），均为无偿转让（代持还原）；郝霄鹏向宗艳民转让10%（654.30万元）、向胡小波转让6%（392.58万元）、向徐现刚转让6%（392.58万元），转让价格均为1元/出资额",
+     "page": 50
+    },
+    {
+     "date": "2013-11",
+     "kind": "股权转让",
+     "price": 1.18,
+     "unit": "元/出资额",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "宗艳民",
+     "note": "第三次股权转让：郝霄鹏向宗艳民转让8%（523.44万元）、胡小波转让6%（392.58万元）、徐现刚转让6%（392.58万元）；宗艳民受让后委托高文青代持",
+     "page": 51
+    },
+    {
+     "date": "2016-12",
+     "kind": "股权转让",
+     "price": null,
+     "unit": null,
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "窦文涛",
+     "note": "第四次股权转让：宗艳民向窦文涛转让80%（5,234.40万元），为无偿转让，代持形成",
+     "page": 51
+    },
+    {
+     "date": "2019-06",
+     "kind": "股权转让",
+     "price": 1.0,
+     "unit": "元/注册资本",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "宗艳民",
+     "note": "第五次股权转让：窦文涛（80%股权）→宗艳民、高文青（20%股权）→宗艳民，本次转让为代持还原",
+     "page": 49
+    },
+    {
+     "date": "2019-07",
+     "kind": "增资",
+     "price": 1.0,
+     "unit": "元/注册资本",
+     "capital_before": 6543.0,
+     "capital_after": 8178.75,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "上海麦明、上海铸傲",
+     "note": "第三次增资：上海麦明以817.875万元认缴新增注册资本817.875万元、上海铸傲以817.875万元认缴817.875万元；本次为员工持股平台增资",
+     "page": 49
+    },
+    {
+     "date": "2019-08",
+     "kind": "增资",
+     "price": 12.23,
+     "unit": "元/注册资本",
+     "capital_before": 8178.75,
+     "capital_after": 9087.5,
+     "valuation": 10.0,
+     "valuation_type": "投前",
+     "investors": "哈勃投资",
+     "note": "第四次增资：哈勃投资以11,111.1111万元认缴新增注册资本908.75万元",
+     "page": 49
+    },
+    {
+     "date": "2019-12",
+     "kind": "增资",
+     "price": 19.81,
+     "unit": "元/注册资本",
+     "capital_before": 9087.5,
+     "capital_after": 10854.5139,
+     "valuation": 18.0,
+     "valuation_type": "投前",
+     "investors": "众海泰昌、辽宁海通新能源、辽宁中德",
+     "note": "第五次增资：众海泰昌以5,500万元认缴277.6736万元、辽宁海通新能源以7,000万元认缴353.4028万元、辽宁中德以22,500万元认缴1,135.9375万元",
+     "page": 49
+    },
+    {
+     "date": "2020-05",
+     "kind": "股权转让",
+     "price": 24.0,
+     "unit": "元/注册资本",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": 26.05,
+     "valuation_type": "公司估值",
+     "investors": "郭西省、惠友创嘉、广东睿晨、宁波云翼、惠友创享",
+     "note": "第六次股权转让：宗艳民分别转让1.38%、1.38%、1.29%、1.15%、0.77%股权",
+     "page": 49
+    },
+    {
+     "date": "2020-06",
+     "kind": "股权转让",
+     "price": 53.43,
+     "unit": "元/注册资本",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": 58.0,
+     "valuation_type": "公司估值",
+     "investors": "辽宁正为",
+     "note": "第七次股权转让：宗艳民（4.1379%股权）→辽宁正为；转让金额24,000万元，转让股权出资额449.1523万元",
+     "page": 49
+    },
+    {
+     "date": "2020-08",
+     "kind": "增资",
+     "price": 78.31,
+     "unit": "元/注册资本",
+     "capital_before": 10854.5139,
+     "capital_after": 12891.3313,
+     "valuation": 85.0,
+     "valuation_type": "投前",
+     "investors": "镇江智硅等26名股东",
+     "note": "第六次增资：各自以货币资金认缴新增注册资本合计2,036.8174万元",
+     "page": 49
+    },
+    {
+     "date": "2020-08",
+     "kind": "股权转让",
+     "price": 78.31,
+     "unit": "元/注册资本",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": 100.95,
+     "valuation_type": "公司估值",
+     "investors": "泛海愿景、安岱汇智、青芯诚明、济南舜兴、青岛铁岳、青岛源创",
+     "note": "第八次股权转让：宗艳民分别转让0.0991%、0.2972%、0.6934%、0.1981%、0.6439%、0.2476%股权",
+     "page": 49
+    },
+    {
+     "date": "2020-10",
+     "kind": "股权转让",
+     "price": 78.31,
+     "unit": "元/注册资本",
+     "capital_before": null,
+     "capital_after": null,
+     "valuation": 100.95,
+     "valuation_type": "公司估值",
+     "investors": "济南国材",
+     "note": "第九次股权转让：宗艳民（6.6284%股权）、上海麦明（0.3628%股权）、上海铸傲（3.0088%股权）→济南国材",
+     "page": 49
+    },
+    {
+     "date": "2020-11",
+     "kind": "股改",
+     "price": null,
+     "unit": null,
+     "capital_before": null,
+     "capital_after": 38673.9939,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "",
+     "note": "天岳有限整体变更为股份有限公司：以2020年8月31日为基准日经审计账面净资产2,164,419,759.53元按1:0.1787折成股本386,739,939股，剩余部分转作资本公积，注册资本386,739,939元",
+     "page": 47
+    },
+    {
+     "date": "2020-11",
+     "kind": "转增",
+     "price": null,
+     "unit": null,
+     "capital_before": null,
+     "capital_after": 38673.9939,
+     "valuation": null,
+     "valuation_type": null,
+     "investors": "",
+     "note": "2020年11月创立大会暨第一次股东大会议案，同意注册资本增加至386,739,939元，新增注册资本由公司股东以资本公积按出资比例转增注册资本",
+     "page": 80
+    }
+   ]
+  },
+  "ipo": {
+   "pre_ipo_shares": {
+    "value": 386739939.0,
+    "page": 20
+   },
+   "issue_price": {
+    "value": 82.79,
+    "page": 3
+   },
+   "issue_shares": {
+    "value": 4297.1105,
+    "page": 3
+   }
+  },
+  "lockup": {
+   "new_shareholders_last_year": {
+    "months": 0,
+    "start": "",
+    "quote": "",
+    "page": 0
+   },
+   "other_shareholders": null
+  },
+  "financials": {
+   "years": [
+    {
+     "year": "2020",
+     "revenue": 42481.19,
+     "net_profit": -64161.32,
+     "net_profit_deducted": 2268.78,
+     "page": 22
+    },
+    {
+     "year": "2019",
+     "revenue": 26855.84,
+     "net_profit": -20068.36,
+     "net_profit_deducted": 522.91,
+     "page": 22
+    },
+    {
+     "year": "2018",
+     "revenue": 13613.4,
+     "net_profit": -4213.96,
+     "net_profit_deducted": -5296.18,
+     "page": 22
+    }
+   ]
+  },
+  "customers": {
+   "year": "2020",
+   "top5_share": 89.45,
+   "top1_share": 45.43,
+   "page": 152
+  },
+  "risks": {
+   "risks": [
+    {
+     "title": "（二）公司产品技术与全球行业龙头相比存在差距的风险",
+     "summary": "各尺寸量产推出时间落后龙头，尚不具备8英寸量产能力，大尺寸供应与供应链配套均有差距。",
+     "page": 36
+    },
+    {
+     "title": "（一）客户集中度高及主要客户依赖风险",
+     "summary": "半绝缘型衬底下游龙头集中度高、单家需求大，主要客户依赖影响收入稳定性。",
+     "page": 37
+    },
+    {
+     "title": "（二）关联交易的风险",
+     "summary": "关联采购占营业成本最高达36.61%，关联销售占销售额比例升至49.24%，存在利益输送隐患。",
+     "page": 41
+    },
+    {
+     "title": "（一）财务内控不规范的风险",
+     "summary": "报告期内存在转贷、无真实交易背景票据交易等内控不规范行为，整改时间较短。",
+     "page": 41
+    },
+    {
+     "title": "（一）公司存在累计未弥补亏损的风险",
+     "summary": "报告期多期亏损，2021年6月末合并累计未分配利润-10,967.29万元，短期无法分红。",
+     "page": 42
+    }
+   ]
+  },
+  "business": {
+   "summary": "专注于碳化硅衬底的研发、生产和销售，主要产品为半绝缘型衬底和导电型衬底",
+   "industry": "新一代信息技术、新材料（按《战略性新兴产业分类（2018）》，主要产品碳化硅衬底材料属于\"1 新一代信息技术\"之\"1.2.3 高储能和关键电子材料制造\"和\"3 新材料产业\"之\"3.4.3.1 半导体晶体制造\"）",
+   "page": 25
+  },
+  "lockup_by_investor": {
+   "镇江智硅": {
+    "found": false,
+    "months_from_listing": null,
+    "months_from_acquisition": null,
+    "rule": "",
+    "quote": "",
+    "page": null
+   }
+  }
+ },
+ "unverified": [
+  {
+   "field": "lockup.new_shareholders_last_year",
+   "value": "未找到",
+   "page": 0
+  }
+ ]
+}

@@ -53,6 +53,19 @@ quant_rebalances = Table("quant_rebalances", meta, Column("id", Integer, primary
                          Column("fill_rate", Float), Column("unfilled_value", Float), Column("traded_value", Float), Column("impact_bp", Float),
                          Column("created_at", DateTime))
 
+# PE / VC
+pe_tx = Table("pe_tx", meta, Column("id", Integer, primary_key=True, autoincrement=True), Column("product", String(32)), Column("deal", String(16)),
+              Column("date", Date), Column("type", String(16)), Column("qty", Float), Column("price", Float), Column("amount", Float), Column("note", Text))
+pe_marks = Table("pe_marks", meta, Column("id", Integer, primary_key=True, autoincrement=True), Column("product", String(32)), Column("date", Date),
+                 Column("deal", String(16)), Column("status", String(16)), Column("method", String(64)), Column("qty", Float), Column("price", Float),
+                 Column("discount", Float), Column("fv", Float), Column("cost", Float), Column("note", Text))
+pe_capital = Table("pe_capital", meta, Column("id", Integer, primary_key=True, autoincrement=True), Column("product", String(32)), Column("date", Date),
+                   Column("notice_date", Date), Column("lp", String(16)), Column("type", String(16)), Column("amount", Float), Column("detail", JSON))
+pe_quarters = Table("pe_quarters", meta, Column("product", String(32), primary_key=True), Column("date", Date, primary_key=True), Column("metrics", JSON))
+pe_pipeline = Table("pe_pipeline", meta, Column("id", Integer, primary_key=True, autoincrement=True), Column("product", String(32)),
+                    Column("deal", String(16)), Column("company", String(64)), Column("sector", String(32)), Column("stage", String(16)),
+                    Column("status", String(16)), Column("events", JSON), Column("reason", Text), Column("synthetic", Integer))
+
 _engine = None
 
 
@@ -86,4 +99,4 @@ def add(table: Table, rows: list[dict] | dict) -> None:
 
 
 __all__ = ["engine", "df", "replace_rows", "add", "select", "delete", "products", "nav", "holdings", "trades", "flows", "risk",
-           "limit_events", "reconcile", "quant_rebalances", "pool", "ic", "orders"]
+           "limit_events", "reconcile", "quant_rebalances", "pe_tx", "pe_marks", "pe_capital", "pe_quarters", "pe_pipeline", "pool", "ic", "orders"]

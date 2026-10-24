@@ -1,13 +1,15 @@
 <template>
   <h1>资管中台</h1>
-  <div class="sub" v-if="!isQuant">托管估值表 → 净值与估值核对 → 每日风控与合同限额 → 业绩归因 → 股票池与投委会 → 交易前检查 → 投资者月报</div>
+  <div class="sub" v-if="isPE">项目管线 → 尽调 Agent（招股说明书）→ 投决 → 出资 → 交割 → 季度估值（IPEV / AAP）→ 上市与解禁 → 减持 → 分配瀑布 → LP 季报</div>
+  <div class="sub" v-else-if="!isQuant">托管估值表 → 净值与估值核对 → 每日风控与合同限额 → 业绩归因 → 股票池与投委会 → 交易前检查 → 投资者月报</div>
   <div class="sub" v-else>因子库与因子检验 → 风险模型 → 约束优化 → 分日执行（成交量参与率、冲击成本）→ 托管估值表 → 风控合规 → 超额收益分解</div>
   <div class="card row">
     <select v-model="code" @change="tab = '产品概览'; loadAll()"><option v-for="p in products" :key="p.code" :value="p.code">{{ p.name }}</option></select>
-    <span v-for="t in tabs" :key="t" class="chip" :style="tab === t ? 'background:var(--accent);color:#fff' : ''" @click="tab = t">{{ t }}</span>
+    <span v-for="t in (isPE ? [] : tabs)" :key="t" class="chip" :style="tab === t ? 'background:var(--accent);color:#fff' : ''" @click="tab = t">{{ t }}</span>
   </div>
 
-  <template v-if="ov">
+  <PEView v-if="isPE" :key="code" :code="code" :initial-tab="initialTab" />
+  <template v-else-if="ov">
     <!-- 产品概览 -->
     <template v-if="tab === '产品概览'">
       <div class="grid g5" style="margin-top:14px">
@@ -214,8 +216,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, followJob, pct, wan } from '../api'
 import LineChart from '../components/LineChart.vue'
+import PEView from './PE.vue'
 
 const isQuant = computed(() => ov.value?.product.type === 'quant_enhanced')
+const isPE = computed(() => products.value.find((p) => p.code === code.value)?.type === 'private_equity')
+const initialTab = ref('')
 const bname = computed(() => ov.value?.product.bench_name || '基准')
 const tabs = computed(() => isQuant.value ? ['产品概览', '风控合规', '超额归因', '因子研究', '组合优化与执行', '估值表与对账']
   : ['产品概览', '风控合规', '业绩归因', '股票池与投委会', '交易前检查', '估值表与对账'])
@@ -233,12 +238,14 @@ const month = ref('2026-09'), reporting = ref(false), reportUrl = ref('')
 
 onMounted(async () => {   // 支持深链接：/fund?product=CV-QE1&tab=超额归因
   const q = new URLSearchParams(location.search)
-  products.value = await api('/api/fund/products')
+  initialTab.value = q.get('tab') || ''                 // 先设好：PE 页面在产品列表加载后立刻挂载，挂载时就要拿到 tab
   if (q.get('product')) code.value = q.get('product')
+  products.value = await api('/api/fund/products')
   await loadAll()
   if (q.get('tab') && tabs.value.includes(q.get('tab'))) tab.value = q.get('tab')
 })
 async function loadAll() {
+  if (isPE.value) { ov.value = null; return }
   ov.value = await api(`/api/fund/${code.value}/overview`)
   events.value = await api(`/api/fund/${code.value}/events`)
   sheets.value = await api(`/api/fund/${code.value}/sheets`)

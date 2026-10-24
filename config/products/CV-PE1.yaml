@@ -1,0 +1,75 @@
+# Cyron 成长股权投资基金 1 期（模拟产品）
+# 组合公司是真实的科创板公司：投资轮次、价格、估值、锁定承诺由尽调 Agent 从招股说明书抽取（带页码、逐一核对），上市后用真实行情。
+# 「基金跟投了这一轮」是模拟的；两个未上市项目（synthetic）是虚构的，用来体现股权投资真实存在的失败率——只投后来上市成功的公司是后见之明。
+code: CV-PE1
+name: Cyron 成长股权投资基金1期（有限合伙）
+type: private_equity
+manager: Cyron 资产管理（模拟，普通合伙人 / 执行事务合伙人）
+custodian: 模拟托管银行
+inception: 2020-01-15              # 首次交割
+benchmark: sh000300                # PME 对标指数
+pme_indices: {sh000300: 沪深300, sh000905: 中证500}
+commitment: 800000000              # 认缴规模 8 亿元
+terms:
+  investment_period_years: 3       # 投资期
+  exit_period_years: 4             # 退出期
+  extension_years: 2               # 可延长
+  mgmt_fee_invest: 0.02            # 投资期：认缴额 × 2%
+  mgmt_fee_exit: 0.02              # 退出期：未退出项目投资成本 × 2%
+  fee_billing_months: 6            # 管理费半年预收
+  fund_expense: 0.0015             # 基金费用（审计、托管、律师），认缴额 × 0.15% / 年
+  hurdle: 0.08                     # 门槛收益（复利）
+  carry: 0.20                      # 业绩报酬
+  catch_up: 1.0                    # GP 追补比例（100%）
+  waterfall: european              # 整体分配（先回本、再门槛、再追补、再 80/20）
+  cash_reserve: 0.01               # 分配时保留认缴额 1% 的现金
+  call_notice_days: 10             # 缴款通知提前天数
+  gp_commitment: 0.01              # GP 认缴 1%：不收管理费、不计提业绩报酬
+lps:                               # 有限合伙人（模拟）
+  - {id: LP01, name: 某省级政府引导基金, type: 政府引导基金, commitment: 160000000}
+  - {id: LP02, name: 某保险资管, type: 保险资金, commitment: 200000000}
+  - {id: LP03, name: 某市场化母基金, type: 母基金, commitment: 160000000}
+  - {id: LP04, name: 某上市公司, type: 产业资本, commitment: 120000000}
+  - {id: LP05, name: 某家族办公室, type: 高净值, commitment: 152000000}
+  - {id: GP, name: Cyron 资产管理（GP 跟投）, type: GP, commitment: 8000000}
+exit_policy:
+  sell_months: 6                   # 解禁后 6 个月内分批减持
+  max_volume_share: 0.10           # 每日不超过成交量 10%
+  max_total_share_90d: 0.01        # 集中竞价：任意 90 天不超过公司总股本 1%
+  cost: 0.003                      # 卖出成本（佣金、印花税、冲击）
+  defer_below_cost: true           # 股价低于投资成本暂缓减持，每季度投委会复议
+  must_exit_before_years: 6        # 成立满 6 年后不论价格都要减持完
+deals:                             # 真实轮次：用 date + kind + price/valuation 在尽调结果里定位
+  - {code: "688120", sector: 电子, round: {date: 2020-03, kind: 增资, price: 20.0}, amount: 60000000, close: 2020-03-20, lead: 国投基金}
+  - {code: "688114", sector: 医药生物, round: {date: 2020-06, kind: 增资, valuation: 220.49}, amount: 120000000, close: 2020-06-29, lead: 天津鲲鹏}
+  - {code: "688234", sector: 电子, round: {date: 2020-08, kind: 增资, price: 78.31}, amount: 100000000, close: 2020-08-31, lead: 镇江智硅}
+  - {code: "688041", sector: 电子, round: {date: 2020-09, kind: 增资, price: 11.21}, amount: 150000000, close: 2020-09-25, lead: 中信证券投资}
+  - {code: "688498", sector: 通信, round: {date: 2020-09, kind: 增资, price: 66.56}, amount: 20000000, close: 2020-09-30, lead: 哈勃投资}
+  - {code: "688176", sector: 医药生物, round: {date: 2020-10, kind: 增资, price: 236.98}, amount: 80000000, close: 2020-10-30, lead: QM139}
+synthetic_deals:                   # 虚构的未上市项目（明确标注）
+  - id: SYN-AR
+    name: 某 AR 光学模组公司（虚构）
+    sector: 电子
+    amount: 70000000
+    close: 2021-03-15
+    post_money: 1500000000
+    story: [{date: 2022-06-30, mark: 0.5, note: 量产延期、下一轮融资失败，按 IPEV 指引下调 50%},
+            {date: 2024-03-31, mark: 0.0, note: 公司进入清算，全额核销}]
+  - id: SYN-EV
+    name: 某充电桩运营商（虚构，含对赌回购条款）
+    sector: 电力设备
+    amount: 50000000
+    close: 2020-12-10
+    post_money: 2000000000
+    buyback: {deadline: 2023-12-31, rate: 0.08, simple: true}
+    story: [{date: 2023-12-31, mark: 1.0, note: 未能在 2023 年底前上市，触发回购，按本金 + 8% 单利主张},
+            {date: 2024-09-30, recovery: 0.70, note: 实控人现金不足，协商按回购款 70% 分两期支付后退出}]
+pipeline_only:                     # 进入过管线但没有投资的真实公司（决策过程为模拟）
+  - {code: "688220", stage: 尽调, reason: 可参与的轮次只剩员工持股平台增资，外部投资份额已满}
+  - {code: "688261", stage: 投决, decision: 否决, reason: 功率器件赛道竞争激烈，估值相对同业溢价过高}
+  - {code: "688213", stage: 投决, decision: 否决, reason: 客户集中度高、安防领域需求周期性强}
+  - {code: "688326", stage: 立项, reason: 领投方锁定全部额度}
+  - {code: "688271", stage: 线索, reason: 单轮门槛过高，超出单项目投资上限（认缴额 20%）}
+  - {code: "688375", stage: 线索, reason: 国资股东定向增资，不对外开放}
+  - {code: "688331", stage: 投决, decision: 否决, reason: 核心产品处于临床阶段，商业化不确定性高}
+  - {code: "688349", stage: 线索, reason: 公司未开放外部融资}
